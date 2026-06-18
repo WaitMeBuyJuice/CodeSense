@@ -155,7 +155,7 @@ async def project_map_summary(project_root: Path) -> str:
         | set(dir_syms.keys())
         | _leaf_dirs_from_files(all_file_paths)
     )
-    prompt = _build_project_map_prompt(dir_deps, dir_syms)
+    prompt = _build_project_map_prompt(dir_deps, dir_syms, roots=roots)
     modules_json = await _call_llm_for_modules(prompt, valid_dirs=valid_dirs)
 
     expanded = _expand_module_files(modules_json, all_file_paths)
@@ -527,8 +527,12 @@ def _render_project_map_markdown(
 def _build_project_map_prompt(
     dir_deps: dict[str, dict[str, list[str]]],
     dir_syms: dict[str, list[dict[str, str]]],
+    roots: tuple[str, ...] = _DEFAULT_INCLUDE_ROOTS,
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
+    n_dirs = len(all_dirs)
+    min_modules = max(2, (n_dirs + 1) // 2)
+    roots_str = "、".join(f"`{r}`" for r in roots)
 
     dir_lines: list[str] = []
     for d in all_dirs:
@@ -554,6 +558,13 @@ def _build_project_map_prompt(
     return (
         "# 项目模块划分请求\n\n"
         "你是一位软件架构师。根据以下项目结构数据，请你推断项目的逻辑模块划分。\n\n"
+        "## 上下文\n"
+        f"- 以下目录均位于产品源代码根（{roots_str}）下，是项目的核心实现，"
+        "已排除测试与脚手架。\n"
+        f"- 项目共 {n_dirs} 个目录，**默认假设：每个目录代表一个独立模块**，"
+        f"预期产出约 {n_dirs} 个模块。\n"
+        "- 仅当两个目录承担**完全相同**的职责且强耦合时，才可合并为同一模块；"
+        "语义不同的目录（如 errors、llm、cache）必须独立成模块。\n\n"
         "## 输入数据\n\n"
         "### 目录结构（含代表性符号，最多 50 个/目录）\n"
         f"{dir_section}\n\n"
@@ -570,7 +581,9 @@ def _build_project_map_prompt(
         "- 不要输出标题行、编号、Markdown 格式或任何其他内容\n"
         "- 目录路径为相对项目根的路径\n"
         "- 同一目录不归属多个模块\n"
-        "- 覆盖所有非平凡目录\n"
+        "- 必须覆盖所有目录\n"
+        f"- 至少产出 {min_modules} 个模块；**禁止把所有目录归到单一模块**\n"
+        "- 模块名 2-20 个字符；不得包含重复词或与描述列粘连\n"
     )
 
 

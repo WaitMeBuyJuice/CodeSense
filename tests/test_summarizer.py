@@ -620,6 +620,37 @@ def test_filter_dir_deps_removes_empty_buckets() -> None:
     assert _filter_dir_deps(deps, ("src",)) == {}
 
 
+# ---- _build_project_map_prompt hints (anti "all-in-one" hallucination) ------
+
+
+def test_build_project_map_prompt_includes_min_modules_floor() -> None:
+    """Prompt 必须告诉 LLM 至少产出 N 个模块，避免被弱模型一锅烩。"""
+    from codesense_v1.summarizer.summarizer import _build_project_map_prompt
+
+    # 9 个目录 → min_modules = max(2, (9+1)//2) = 5
+    dir_syms = {f"src/d{i}": [] for i in range(9)}
+    prompt = _build_project_map_prompt({}, dir_syms, roots=("src",))
+    assert "至少产出 5 个模块" in prompt
+    assert "禁止把所有目录归到单一模块" in prompt
+
+
+def test_build_project_map_prompt_marks_roots_in_context() -> None:
+    """Prompt 应明示目录来源（白名单根），并强调每目录独立。"""
+    from codesense_v1.summarizer.summarizer import _build_project_map_prompt
+
+    prompt = _build_project_map_prompt({}, {"src/a": []}, roots=("src", "scripts"))
+    assert "`src`" in prompt and "`scripts`" in prompt
+    assert "每个目录代表一个独立模块" in prompt
+
+
+def test_build_project_map_prompt_default_roots() -> None:
+    """不传 roots 时默认使用 src（保持向后兼容）。"""
+    from codesense_v1.summarizer.summarizer import _build_project_map_prompt
+
+    prompt = _build_project_map_prompt({}, {"src/a": []})
+    assert "`src`" in prompt
+
+
 # ---- dummy to satisfy Any annotation ---------------------------------------
 
 
