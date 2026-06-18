@@ -1,5 +1,0 @@
-{
-  "module_name": "数据持久化层",
-  "summary": "# 模块理解文档：数据持久化层\n\n## 一句话描述\n管理缓存文件的读写、校验与失效逻辑\n\n## 对外接口\n\n根据模块内部符号定义，以下为公开（非 `_` 开头）函数：\n\n- `db_hash` — 计算数据库文件的哈希值\n- `is_cache_valid` — 校验缓存是否有效\n- `read_project_map` — 读取项目映射缓存\n- `write_project_map` — 写入项目映射缓存\n- `read_modules_index` — 读取模块索引缓存\n- `write_modules_index` — 写入模块索引缓存\n- `read_module` — 读取单个模块缓存\n- `write_module` — 写入单个模块缓存\n- `invalidate` — 使缓存失效\n- `module_key` — 生成模块缓存键\n- `safe_key` — 生成安全的文件名键\n\n## 内部文件\n\n| 文件 | 作用 |\n|------|------|\n| `src/codesense_v1/cache/__init__.py` |.py` | 模块初始化文件，当前为空，用于标识包 |\n| `src/codesense_v1/cache/cache.py` | 实现缓存文件的读写、哈希校验、元数据管理及失效逻辑 |\n\n## 依赖关系\n\n| 方向 | 目录 |\n|------ |\n|------|------|\n| 上游（该模块依赖的目录） | **无** |\n| 下游（依赖该模块的目录） | `src/codesense_v1/summarizer` |",
-  "generated_at": "2026-06-18T02:37:02.746976+00:00"
-}
