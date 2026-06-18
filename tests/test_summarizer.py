@@ -560,6 +560,66 @@ async def test_call_llm_for_modules_repair_extends_existing_module() -> None:
     assert set(mod_a[0]["directories"]) == {"src/a", "src/extra"}
 
 
+# ---- include-roots filter (CODESENSE_INCLUDE_DIRS) --------------------------
+
+
+def test_get_include_roots_default(monkeypatch: Any) -> None:
+    from codesense_v1.summarizer.summarizer import _get_include_roots
+
+    monkeypatch.delenv("CODESENSE_INCLUDE_DIRS", raising=False)
+    assert _get_include_roots() == ("src",)
+
+
+def test_get_include_roots_from_env(monkeypatch: Any) -> None:
+    from codesense_v1.summarizer.summarizer import _get_include_roots
+
+    monkeypatch.setenv("CODESENSE_INCLUDE_DIRS", "src, scripts , app/")
+    assert _get_include_roots() == ("src", "scripts", "app")
+
+
+def test_get_include_roots_empty_env_falls_back(monkeypatch: Any) -> None:
+    from codesense_v1.summarizer.summarizer import _get_include_roots
+
+    monkeypatch.setenv("CODESENSE_INCLUDE_DIRS", "   ,  ")
+    assert _get_include_roots() == ("src",)
+
+
+def test_is_under_roots_matches_root_and_nested() -> None:
+    from codesense_v1.summarizer.summarizer import _is_under_roots
+
+    roots = ("src", "scripts")
+    assert _is_under_roots("src", roots)
+    assert _is_under_roots("src/foo", roots)
+    assert _is_under_roots("src/foo/bar", roots)
+    assert _is_under_roots("scripts", roots)
+    assert not _is_under_roots("tests", roots)
+    assert not _is_under_roots("docs/api", roots)
+    # 前缀错配陷阱：src_extra 不应匹配 src
+    assert not _is_under_roots("src_extra", roots)
+
+
+def test_filter_dir_deps_drops_outside_edges() -> None:
+    from codesense_v1.summarizer.summarizer import _filter_dir_deps
+
+    deps = {
+        "src/a": {"imports": ["src/b", "tests/x"]},
+        "tests/x": {"imports": ["src/a"]},
+        "src/b": {"imports": ["src/a"]},
+    }
+    result = _filter_dir_deps(deps, ("src",))
+    assert "tests/x" not in result
+    assert result["src/a"]["imports"] == ["src/b"]
+    assert result["src/b"]["imports"] == ["src/a"]
+
+
+def test_filter_dir_deps_removes_empty_buckets() -> None:
+    """所有目标都被过滤掉的源目录应整体消失。"""
+    from codesense_v1.summarizer.summarizer import _filter_dir_deps
+
+    deps = {"src/a": {"imports": ["tests/x"]}}
+    assert _filter_dir_deps(deps, ("src",)) == {}
+
+
 # ---- dummy to satisfy Any annotation ---------------------------------------
 
 

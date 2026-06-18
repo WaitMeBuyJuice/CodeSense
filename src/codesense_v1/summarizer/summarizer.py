@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import os
 import re
 from pathlib import Path
 
@@ -20,6 +21,50 @@ _NAME_MAX_LEN = 20
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
+_INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
+_DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
+
+
+def _get_include_roots() -> tuple[str, ...]:
+    """Return the directory roots to be included in module analysis.
+
+    Read from env var ``CODESENSE_INCLUDE_DIRS`` (comma-separated). Defaults to
+    ``("src",)``. Empty/whitespace values fall back to the default. Trailing
+    slashes and backslashes are normalised so ``"src/"``/``"src\\"`` are
+    accepted equivalents.
+    """
+    raw = os.environ.get(_INCLUDE_DIRS_ENV, "")
+    parts = [
+        r.strip().replace("\\", "/").rstrip("/")
+        for r in raw.split(",")
+        if r.strip()
+    ]
+    parts = [p for p in parts if p]
+    return tuple(parts) if parts else _DEFAULT_INCLUDE_ROOTS
+
+
+def _is_under_roots(d: str, roots: tuple[str, ...]) -> bool:
+    """Return True if directory *d* equals or is nested under any root."""
+    d_norm = d.replace("\\", "/").rstrip("/")
+    return any(d_norm == r or d_norm.startswith(r + "/") for r in roots)
+
+
+def _filter_dir_deps(
+    dir_deps: dict[str, dict[str, list[str]]], roots: tuple[str, ...]
+) -> dict[str, dict[str, list[str]]]:
+    """Keep only edges where both source and target are under *roots*."""
+    out: dict[str, dict[str, list[str]]] = {}
+    for src, buckets in dir_deps.items():
+        if not _is_under_roots(src, roots):
+            continue
+        kept_buckets: dict[str, list[str]] = {}
+        for kind, targets in buckets.items():
+            kept = [t for t in targets if _is_under_roots(t, roots)]
+            if kept:
+                kept_buckets[kind] = kept
+        if kept_buckets:
+            out[src] = kept_buckets
+    return out
 
 
 def _leaf_dirs_from_files(file_paths: list[str]) -> set[str]:
@@ -97,6 +142,13 @@ async def project_map_summary(project_root: Path) -> str:
         )
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
+
+    roots = _get_include_roots()
+    all_file_paths = [
+        p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
+    ]
+    dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+    dir_deps = _filter_dir_deps(dir_deps, roots)
 
     valid_dirs: set[str] = (
         set(dir_deps.keys())
