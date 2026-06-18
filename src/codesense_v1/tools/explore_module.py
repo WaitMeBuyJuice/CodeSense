@@ -4,11 +4,23 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Final
 
 from codesense_v1 import summarizer
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
-from codesense_v1.schemas import EXPLORE_MODULE_INPUT_SCHEMA
+
+_EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "properties": {
+        "module_name": {
+            "type": "string",
+            "description": "project_map 中列出的模块名（如 '缓存层'）",
+        }
+    },
+    "required": ["module_name"],
+    "additionalProperties": False,
+}
 
 
 @tool(
@@ -23,7 +35,7 @@ from codesense_v1.schemas import EXPLORE_MODULE_INPUT_SCHEMA
         "如果不知道有哪些模块，请先读取 codesense://project_map 资源。"
         "返回结果由 LLM 生成，准确性依赖 project_map 阶段的模块划分。"
     ),
-    input_schema=EXPLORE_MODULE_INPUT_SCHEMA,
+    input_schema=_EXPLORE_MODULE_INPUT_SCHEMA,
 )
 async def explore_module(module_name: str) -> str:
     """Raises: InvalidArgumentError, LLMError (→ ToolError chain, handled by registry)."""

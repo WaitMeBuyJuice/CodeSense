@@ -1,14 +1,24 @@
 import math
+from typing import Final
 
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
-from codesense_v1.schemas import ADD_INPUT_SCHEMA
+
+_ADD_INPUT_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "properties": {
+        "a": {"type": "number", "description": "加数 a"},
+        "b": {"type": "number", "description": "加数 b"},
+    },
+    "required": ["a", "b"],
+    "additionalProperties": False,
+}
 
 
 @tool(
     name="add",
     description="计算两个数的和并返回字符串结果。",
-    input_schema=ADD_INPUT_SCHEMA,
+    input_schema=_ADD_INPUT_SCHEMA,
 )
 def add(a: float, b: float) -> str:
     for param_name, v in (("a", a), ("b", b)):
