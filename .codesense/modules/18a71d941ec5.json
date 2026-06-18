@@ -1,0 +1,5 @@
+{
+  "module_name": "资源管理",
+  "summary": "# 模块理解文档：资源管理\n\n## 一句话描述\n负责读取项目映射等静态资源配置信息。\n\n## 对外接口\n\n| 符号名称 | 类型 | 说明 |\n|:---|:---|:---|\n| `read_project_map` | 函数 | 从项目映射文件中读取并返回内容（返回类型：`str`） |\n\n## 内部文件\n\n| 文件路径 | 作用说明 |\n|:---|:---|\n| `src/codesense_v1/resources/__init__.py` | 模块初始化文件，当前无符号导出（空包入口） |\n| `src/codesense_v1/resources/project_map.py` | 提供 `read_project_map` 函数，实现项目映射文件的读取逻辑 |\n\n## 依赖关系\n\n- **上游依赖**（该模块依赖的目录）  \n  - `src/codesense_v1/errors`：可能用于异常处理或错误类型定义  \n  - `src/codesense_v1/summarizer`：可能用于对读取到的资源内容进行摘要处理\n\n- **下游依赖**（依赖该模块的目录）  \n  - `src/codesense_v1/server`：服务端模块，需要调用 `read_project_map` 获取项目映射  \n  - `tests`：测试模块，需对资源读取功能进行单元测试",
+  "generated_at": "2026-06-17T10:55:36.338557+00:00"
+}

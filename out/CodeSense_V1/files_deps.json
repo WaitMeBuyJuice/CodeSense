@@ -1,0 +1,361 @@
+{
+  "scripts/validate_dir_deps.py": {
+    "imports": [
+      "external::argparse",
+      "external::collections",
+      "external::json",
+      "external::pathlib",
+      "src/codesense_v1/data/__init__.py",
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/modules.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/modules.py"
+    ]
+  },
+  "src/codesense_v1/cache/__init__.py": {
+    "imports": [
+      "src/codesense_v1/cache/cache.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/cache/cache.py": {
+    "imports": [
+      "external::datetime",
+      "external::hashlib",
+      "external::json",
+      "external::pathlib"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/data/__init__.py": {
+    "imports": [
+      "src/codesense_v1/data/aggregate.py",
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/files.py",
+      "src/codesense_v1/data/modules.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/data/aggregate.py": {
+    "imports": [
+      "external::pathlib",
+      "src/codesense_v1/data/modules.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/data/db.py": {
+    "imports": [
+      "external::collections.abc",
+      "external::dataclasses",
+      "external::pathlib",
+      "external::sqlite3"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/data/files.py": {
+    "imports": [
+      "external::dataclasses",
+      "external::pathlib",
+      "src/codesense_v1/data/db.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/db.py"
+    ]
+  },
+  "src/codesense_v1/data/modules.py": {
+    "imports": [
+      "external::dataclasses",
+      "src/codesense_v1/data/db.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/db.py"
+    ]
+  },
+  "src/codesense_v1/errors/__init__.py": {
+    "imports": [
+      "src/codesense_v1/errors/errors.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/llm/__init__.py": {
+    "imports": [
+      "src/codesense_v1/llm/llm.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/llm/llm.py": {
+    "imports": [
+      "external::openai",
+      "external::os",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/registry/__init__.py": {
+    "imports": [
+      "src/codesense_v1/registry/registry.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/registry/registry.py": {
+    "imports": [
+      "external::collections.abc",
+      "external::dataclasses",
+      "external::inspect",
+      "external::jsonschema",
+      "external::mcp.types",
+      "external::tool",
+      "external::typing",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/resources/project_map.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::os",
+      "external::pathlib",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/summarizer/__init__.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/schemas/__init__.py": {
+    "imports": [
+      "src/codesense_v1/schemas/schemas.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/schemas/schemas.py": {
+    "imports": [
+      "external::typing"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/server/__init__.py": {
+    "imports": [
+      "src/codesense_v1/server/server.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/server/__main__.py": {
+    "imports": [
+      "src/codesense_v1/server/__init__.py",
+      "src/codesense_v1/server/server.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/server/server.py": {
+    "imports": [
+      "external::asyncio",
+      "external::codesense_v1",
+      "external::mcp.server",
+      "external::mcp.server.lowlevel.helper_types",
+      "external::mcp.server.stdio",
+      "external::mcp.types",
+      "external::pydantic",
+      "src/codesense_v1/registry/__init__.py",
+      "src/codesense_v1/registry/registry.py",
+      "src/codesense_v1/resources/__init__.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/summarizer/__init__.py": {
+    "imports": [
+      "src/codesense_v1/summarizer/summarizer.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/summarizer/summarizer.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::pathlib",
+      "src/codesense_v1/cache/__init__.py",
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/modules.py",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/llm/__init__.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/modules.py"
+    ]
+  },
+  "src/codesense_v1/tools/__init__.py": {
+    "imports": [
+      "external::.",
+      "src/codesense_v1/tools/add.py",
+      "src/codesense_v1/tools/explore_module.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/tools/add.py": {
+    "imports": [
+      "external::math",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/registry/__init__.py",
+      "src/codesense_v1/registry/registry.py",
+      "src/codesense_v1/schemas/__init__.py",
+      "src/codesense_v1/schemas/schemas.py"
+    ],
+    "calls": []
+  },
+  "src/codesense_v1/tools/explore_module.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::os",
+      "external::pathlib",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/registry/__init__.py",
+      "src/codesense_v1/registry/registry.py",
+      "src/codesense_v1/schemas/__init__.py",
+      "src/codesense_v1/schemas/schemas.py",
+      "src/codesense_v1/summarizer/__init__.py"
+    ],
+    "calls": []
+  },
+  "tests/conftest.py": {
+    "imports": [
+      "external::pathlib",
+      "external::pytest",
+      "external::sqlite3"
+    ],
+    "calls": []
+  },
+  "tests/test_add.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::mcp.types",
+      "external::pytest",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/tools/__init__.py",
+      "src/codesense_v1/tools/add.py"
+    ],
+    "calls": [
+      "src/codesense_v1/tools/add.py"
+    ]
+  },
+  "tests/test_cache.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::json",
+      "external::pathlib",
+      "external::pytest",
+      "src/codesense_v1/cache/__init__.py"
+    ],
+    "calls": []
+  },
+  "tests/test_data_aggregate.py": {
+    "imports": [
+      "src/codesense_v1/data/aggregate.py",
+      "src/codesense_v1/data/modules.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/aggregate.py"
+    ]
+  },
+  "tests/test_data_db.py": {
+    "imports": [
+      "external::pathlib",
+      "external::pytest",
+      "external::sqlite3",
+      "src/codesense_v1/data/db.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/db.py"
+    ]
+  },
+  "tests/test_data_modules.py": {
+    "imports": [
+      "external::pathlib",
+      "external::sqlite3",
+      "src/codesense_v1/data/db.py",
+      "src/codesense_v1/data/modules.py"
+    ],
+    "calls": [
+      "src/codesense_v1/data/modules.py"
+    ]
+  },
+  "tests/test_explore_module.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::pathlib",
+      "external::pytest",
+      "external::unittest.mock",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/registry/__init__.py"
+    ],
+    "calls": []
+  },
+  "tests/test_llm.py": {
+    "imports": [
+      "external::openai",
+      "external::pytest",
+      "external::typing",
+      "external::unittest.mock",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/llm/__init__.py",
+      "src/codesense_v1/llm/llm.py"
+    ],
+    "calls": [
+      "src/codesense_v1/llm/llm.py"
+    ]
+  },
+  "tests/test_mcp_integration.py": {
+    "imports": [
+      "external::mcp",
+      "external::mcp.client.stdio",
+      "external::mcp.types",
+      "external::pytest",
+      "external::sys"
+    ],
+    "calls": []
+  },
+  "tests/test_registry.py": {
+    "imports": [
+      "external::mcp.types",
+      "external::pytest",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/registry/__init__.py",
+      "src/codesense_v1/registry/registry.py"
+    ],
+    "calls": [
+      "src/codesense_v1/registry/registry.py"
+    ]
+  },
+  "tests/test_resources_project_map.py": {
+    "imports": [
+      "external::pytest",
+      "external::unittest.mock",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/resources/__init__.py"
+    ],
+    "calls": []
+  },
+  "tests/test_summarizer.py": {
+    "imports": [
+      "external::codesense_v1",
+      "external::pathlib",
+      "external::pytest",
+      "external::typing",
+      "external::unittest.mock",
+      "src/codesense_v1/errors/__init__.py",
+      "src/codesense_v1/errors/errors.py",
+      "src/codesense_v1/summarizer/__init__.py"
+    ],
+    "calls": []
+  }
+}
