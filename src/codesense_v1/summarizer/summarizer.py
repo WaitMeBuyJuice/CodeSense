@@ -15,9 +15,31 @@ from codesense_v1.errors import InvalidArgumentError, LLMError
 _CODESENSE_DIR_NAME = ".codesense"
 _EXTERNAL_PREFIX = "external::"
 _DESC_MAX_LEN = 60
+_NAME_MIN_LEN = 2
+_NAME_MAX_LEN = 20
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
+
+
+def _leaf_dirs_from_files(file_paths: list[str]) -> set[str]:
+    """Return the set of leaf directories (those directly containing source files).
+
+    Used to enrich ``valid_dirs`` so directories whose files define no
+    function/class (e.g. constants-only modules like ``schemas/``) are still
+    eligible for module assignment.
+    """
+    raw: set[str] = set()
+    for fp in file_paths:
+        fp_norm = fp.replace("\\", "/")
+        if "/" not in fp_norm:
+            continue
+        raw.add(fp_norm.rsplit("/", 1)[0])
+    return {
+        d
+        for d in raw
+        if not any(other != d and other.startswith(d + "/") for other in raw)
+    }
 
 
 def _normalize_dir(d: str, valid_dirs: set[str] | None) -> str | None:
@@ -76,7 +98,11 @@ async def project_map_summary(project_root: Path) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
-    valid_dirs: set[str] = set(dir_deps.keys()) | set(dir_syms.keys())
+    valid_dirs: set[str] = (
+        set(dir_deps.keys())
+        | set(dir_syms.keys())
+        | _leaf_dirs_from_files(all_file_paths)
+    )
     prompt = _build_project_map_prompt(dir_deps, dir_syms)
     modules_json = await _call_llm_for_modules(prompt, valid_dirs=valid_dirs)
 
@@ -314,6 +340,8 @@ def _parse_modules_text(
             continue
         name, desc = parts[0], parts[1]
         if not name or name.lower() in seen_names:
+            continue
+        if not (_NAME_MIN_LEN <= len(name) <= _NAME_MAX_LEN):
             continue
         desc = _dedup_description(desc)
         dirs_str = parts[2]

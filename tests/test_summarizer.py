@@ -350,17 +350,17 @@ def test_parse_modules_text_skips_no_pipe_lines() -> None:
 def test_parse_modules_text_deduplicates_names() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text
 
-    result = _parse_modules_text("A|desc|src/a\na|desc2|src/b")
+    result = _parse_modules_text("AA|desc|src/a\naa|desc2|src/b")
     assert len(result) == 1
-    assert result[0]["name"] == "A"
+    assert result[0]["name"] == "AA"
 
 
 def test_parse_modules_text_skips_overlapping_dirs() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text
 
-    result = _parse_modules_text("A|desc|src\nB|desc|src/sub")
+    result = _parse_modules_text("AA|desc|src\nBB|desc|src/sub")
     assert len(result) == 1
-    assert result[0]["name"] == "A"
+    assert result[0]["name"] == "AA"
 
 
 def test_parse_modules_text_empty_returns_empty() -> None:
@@ -394,7 +394,7 @@ def test_parse_modules_text_filters_invalid_dirs() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text
 
     valid = {"src/a", "src/b"}
-    result = _parse_modules_text("M|desc|src/a,src/typo_xyz", valid_dirs=valid)
+    result = _parse_modules_text("MM|desc|src/a,src/typo_xyz", valid_dirs=valid)
     assert len(result) == 1
     assert result[0]["directories"] == ["src/a"]
 
@@ -430,8 +430,57 @@ def test_parse_modules_text_truncates_long_description() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text, _DESC_MAX_LEN
 
     long_desc = "x" * 200
-    result = _parse_modules_text(f"M|{long_desc}|src/a")
+    result = _parse_modules_text(f"MM|{long_desc}|src/a")
     assert len(result[0]["description"]) <= _DESC_MAX_LEN
+
+
+def test_parse_modules_text_rejects_too_short_name() -> None:
+    """单字模块名（LLM 截断产物，如'层'）应被丢弃。"""
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    result = _parse_modules_text("层|desc|src/a\n工具层|desc|src/b")
+    names = [m["name"] for m in result]
+    assert "层" not in names
+    assert "工具层" in names
+
+
+def test_parse_modules_text_rejects_too_long_name() -> None:
+    """过长模块名（LLM 把描述串到名称列）应被丢弃。"""
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    long_name = "资源" * 20  # 40 chars
+    result = _parse_modules_text(f"{long_name}|desc|src/a")
+    assert result == []
+
+
+# ---- _leaf_dirs_from_files --------------------------------------------------
+
+
+def test_leaf_dirs_from_files_returns_only_leaves() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    files = [
+        "src/codesense_v1/__init__.py",
+        "src/codesense_v1/cache/cache.py",
+        "src/codesense_v1/schemas/schemas.py",
+    ]
+    result = _leaf_dirs_from_files(files)
+    # src/codesense_v1 是 cache/schemas 的父目录，应被剔除
+    assert result == {"src/codesense_v1/cache", "src/codesense_v1/schemas"}
+
+
+def test_leaf_dirs_from_files_handles_windows_separator() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    files = ["src\\codesense_v1\\schemas\\schemas.py"]
+    result = _leaf_dirs_from_files(files)
+    assert result == {"src/codesense_v1/schemas"}
+
+
+def test_leaf_dirs_from_files_ignores_top_level_files() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    assert _leaf_dirs_from_files(["README.md"]) == set()
 
 
 # ---- _call_llm_for_modules coverage repair ----------------------------------
