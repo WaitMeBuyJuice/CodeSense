@@ -387,6 +387,130 @@ def test_parse_modules_text_multi_module(tmp_path: Any) -> None:
     assert "数据层" in names
 
 
+# ---- _parse_modules_text validation (valid_dirs) ----------------------------
+
+
+def test_parse_modules_text_filters_invalid_dirs() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/a", "src/b"}
+    result = _parse_modules_text("M|desc|src/a,src/typo_xyz", valid_dirs=valid)
+    assert len(result) == 1
+    assert result[0]["directories"] == ["src/a"]
+
+
+def test_parse_modules_text_drops_row_when_all_dirs_invalid() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/a"}
+    result = _parse_modules_text("Junk|desc|completely_wrong_xyz", valid_dirs=valid)
+    assert result == []
+
+
+def test_parse_modules_text_fuzzy_corrects_typo() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/codesense_v1/errors"}
+    # 缺少斜杠的常见 LLM 拼写错
+    result = _parse_modules_text(
+        "Errors|desc|src/codesense_v1/erorrs", valid_dirs=valid
+    )
+    assert len(result) == 1
+    assert result[0]["directories"] == ["src/codesense_v1/errors"]
+
+
+def test_parse_modules_text_dedups_description() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    result = _parse_modules_text("工具层|add、explore、add、list|src/tools")
+    assert result[0]["description"] == "add、explore、list"
+
+
+def test_parse_modules_text_truncates_long_description() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text, _DESC_MAX_LEN
+
+    long_desc = "x" * 200
+    result = _parse_modules_text(f"M|{long_desc}|src/a")
+    assert len(result[0]["description"]) <= _DESC_MAX_LEN
+
+
+# ---- _call_llm_for_modules coverage repair ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_fills_missing_dirs() -> None:
+    from codesense_v1.summarizer.summarizer import _call_llm_for_modules
+
+    valid = {"src/a", "src/b", "src/schemas"}
+    # 首轮漏 src/schemas；补齐轮把它归到新模块"Schemas"
+    responses = iter(
+        [
+            "ModA|desc|src/a\nModB|desc|src/b",
+            "Schemas|描述|src/schemas",
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    covered = {d for m in result for d in m["directories"]}
+    assert covered == valid
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_appends_fallback_when_repair_fails() -> None:
+    from codesense_v1.summarizer.summarizer import (
+        _FALLBACK_MODULE_NAME,
+        _call_llm_for_modules,
+    )
+
+    valid = {"src/a", "src/orphan"}
+    responses = iter(
+        [
+            "ModA|desc|src/a",
+            "",  # 补齐轮 LLM 不配合，仍漏 src/orphan
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    names = [m["name"] for m in result]
+    assert _FALLBACK_MODULE_NAME in names
+    fallback = next(m for m in result if m["name"] == _FALLBACK_MODULE_NAME)
+    assert "src/orphan" in fallback["directories"]
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_repair_extends_existing_module() -> None:
+    """补齐轮若复用已有模块名，新目录应合并进该模块，不创建重复模块。"""
+    from codesense_v1.summarizer.summarizer import _call_llm_for_modules
+
+    valid = {"src/a", "src/extra"}
+    responses = iter(
+        [
+            "ModA|desc|src/a",
+            "ModA|desc|src/extra",
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    mod_a = [m for m in result if m["name"] == "ModA"]
+    assert len(mod_a) == 1
+    assert set(mod_a[0]["directories"]) == {"src/a", "src/extra"}
+
+
 # ---- dummy to satisfy Any annotation ---------------------------------------
 
 

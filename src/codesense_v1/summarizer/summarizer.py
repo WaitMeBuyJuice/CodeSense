@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+import re
 from pathlib import Path
 
 from codesense_v1 import cache, llm
@@ -12,6 +14,31 @@ from codesense_v1.errors import InvalidArgumentError, LLMError
 
 _CODESENSE_DIR_NAME = ".codesense"
 _EXTERNAL_PREFIX = "external::"
+_DESC_MAX_LEN = 60
+_FUZZY_CUTOFF = 0.85
+_FALLBACK_MODULE_NAME = "其他"
+_FALLBACK_MODULE_DESC = "未归类目录"
+
+
+def _normalize_dir(d: str, valid_dirs: set[str] | None) -> str | None:
+    """Clean a single directory string. Return None if invalid (when validating)."""
+    d = d.strip().strip("`").strip("'").strip('"').rstrip("/").replace("\\", "/")
+    if not d:
+        return None
+    if not valid_dirs:
+        return d
+    if d in valid_dirs:
+        return d
+    matches = difflib.get_close_matches(d, valid_dirs, n=1, cutoff=_FUZZY_CUTOFF)
+    return matches[0] if matches else None
+
+
+def _dedup_description(desc: str) -> str:
+    """Split desc by Chinese/ASCII commas, dedup preserving order, truncate."""
+    parts = [p.strip() for p in re.split(r"[、,，]", desc) if p.strip()]
+    if not parts:
+        return desc.strip()[:_DESC_MAX_LEN]
+    return "、".join(dict.fromkeys(parts))[:_DESC_MAX_LEN]
 
 
 # ---------- public API -------------------------------------------------------
@@ -49,8 +76,9 @@ async def project_map_summary(project_root: Path) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
+    valid_dirs: set[str] = set(dir_deps.keys()) | set(dir_syms.keys())
     prompt = _build_project_map_prompt(dir_deps, dir_syms)
-    modules_json = await _call_llm_for_modules(prompt)
+    modules_json = await _call_llm_for_modules(prompt, valid_dirs=valid_dirs)
 
     expanded = _expand_module_files(modules_json, all_file_paths)
 
@@ -142,31 +170,132 @@ async def module_summary(project_root: Path, module_name: str) -> str:
 # ---------- private: LLM call for module list (pipe-delimited text) ----------
 
 
-async def _call_llm_for_modules(initial_prompt: str) -> list[dict[str, object]]:
-    """Call LLM and parse pipe-delimited module list.  Retry once if empty."""
+async def _call_llm_for_modules(
+    initial_prompt: str,
+    valid_dirs: set[str] | None = None,
+) -> list[dict[str, object]]:
+    """Call LLM, parse modules, then validate & repair against *valid_dirs*.
+
+    Repair pipeline (only when ``valid_dirs`` is provided):
+      1. Drop / fuzzy-correct directories not in ``valid_dirs`` (inside parser).
+      2. If any directory is still uncovered, run one more LLM call asking it
+         to assign the missing directories.
+      3. If anything still missing, append a deterministic fallback module
+         ``"其他"`` so coverage is total.
+    """
     response = await llm.call_llm(initial_prompt)
-    modules = _parse_modules_text(response)
-    if modules:
+    modules = _parse_modules_text(response, valid_dirs)
+    if not modules:
+        retry_prompt = (
+            initial_prompt
+            + "\n\n前次输出解析为空，请确保每行严格遵循「模块名|职责|目录」格式，"
+            "不要输出任何其他内容（不要标题行、不要编号、不要 Markdown）。"
+        )
+        response2 = await llm.call_llm(retry_prompt)
+        modules = _parse_modules_text(response2, valid_dirs)
+        if not modules:
+            raise LLMError("LLM 未输出有效的模块列表（已重试一次）")
+
+    if not valid_dirs:
         return modules
 
-    retry_prompt = (
-        initial_prompt
-        + "\n\n前次输出解析为空，请确保每行严格遵循「模块名|职责|目录」格式，"
-        "不要输出任何其他内容（不要标题行、不要编号、不要 Markdown）。"
+    missing = _missing_dirs(modules, valid_dirs)
+    if missing:
+        modules = await _fill_missing_dirs(modules, missing, valid_dirs)
+
+    missing_final = _missing_dirs(modules, valid_dirs)
+    if missing_final:
+        modules.append(
+            {
+                "name": _FALLBACK_MODULE_NAME,
+                "description": _FALLBACK_MODULE_DESC,
+                "directories": sorted(missing_final),
+            }
+        )
+    return modules
+
+
+def _missing_dirs(
+    modules: list[dict[str, object]], valid_dirs: set[str]
+) -> set[str]:
+    covered: set[str] = set()
+    for m in modules:
+        dirs_raw = m.get("directories")
+        if isinstance(dirs_raw, list):
+            covered.update(str(d) for d in dirs_raw)
+    return valid_dirs - covered
+
+
+async def _fill_missing_dirs(
+    modules: list[dict[str, object]],
+    missing: set[str],
+    valid_dirs: set[str],
+) -> list[dict[str, object]]:
+    """Ask LLM to assign *missing* dirs into existing or new modules."""
+    existing_names = [str(m.get("name", "")) for m in modules]
+    fill_prompt = (
+        "上一轮模块划分遗漏了以下目录，请把它们分配到已有模块或新增模块。\n\n"
+        "## 已有模块\n"
+        + "\n".join(f"- {n}" for n in existing_names)
+        + "\n\n## 未分配目录\n"
+        + "\n".join(f"- `{d}`" for d in sorted(missing))
+        + "\n\n## 输出格式\n"
+        "每行一个模块（仅输出涉及未分配目录的模块），用竖线（|）分隔三列：\n"
+        "  模块名|一句话职责|所属目录（多目录用英文逗号分隔）\n"
+        "- 若复用已有模块，模块名必须与上方完全一致\n"
+        "- 不要输出标题行、编号、Markdown 或其他内容\n"
     )
-    response2 = await llm.call_llm(retry_prompt)
-    modules2 = _parse_modules_text(response2)
-    if not modules2:
-        raise LLMError("LLM 未输出有效的模块列表（已重试一次）")
-    return modules2
+    response = await llm.call_llm(fill_prompt)
+    extra = _parse_modules_text(response, valid_dirs)
+
+    by_name: dict[str, dict[str, object]] = {
+        str(m.get("name", "")).strip().lower(): m for m in modules
+    }
+    for m in extra:
+        key = str(m.get("name", "")).strip().lower()
+        m_dirs_raw = m.get("directories")
+        m_dirs: list[str] = [
+            str(d) for d in (m_dirs_raw if isinstance(m_dirs_raw, list) else [])
+        ]
+        if key in by_name:
+            target = by_name[key]
+            tgt_dirs_raw = target.get("directories")
+            tgt_dirs: list[str] = [
+                str(d) for d in (tgt_dirs_raw if isinstance(tgt_dirs_raw, list) else [])
+            ]
+            for d in m_dirs:
+                if d not in tgt_dirs and d in missing:
+                    tgt_dirs.append(d)
+            target["directories"] = tgt_dirs
+        else:
+            kept = [d for d in m_dirs if d in missing]
+            if kept:
+                modules.append(
+                    {
+                        "name": m.get("name", ""),
+                        "description": m.get("description", ""),
+                        "directories": kept,
+                    }
+                )
+                by_name[key] = modules[-1]
+    return modules
 
 
-def _parse_modules_text(response: str) -> list[dict[str, object]]:
+def _parse_modules_text(
+    response: str,
+    valid_dirs: set[str] | None = None,
+) -> list[dict[str, object]]:
     """Parse pipe-delimited module list from LLM response.
 
     Expected line format::
 
         模块名|一句话职责|目录1,目录2,...
+
+    When *valid_dirs* is provided, every directory must either match a member
+    of *valid_dirs* exactly or be within fuzzy-match distance; otherwise it is
+    silently dropped. Description fields are split by Chinese/ASCII commas,
+    deduplicated while preserving order, and truncated to 60 chars to fix the
+    "add、add、list" class of LLM hallucinations.
 
     Malformed lines are silently skipped; duplicate names and overlapping
     directories are deduplicated so a single bad line never breaks the whole
@@ -186,12 +315,13 @@ def _parse_modules_text(response: str) -> list[dict[str, object]]:
         name, desc = parts[0], parts[1]
         if not name or name.lower() in seen_names:
             continue
+        desc = _dedup_description(desc)
         dirs_str = parts[2]
-        dirs: list[str] = [
-            d.strip().strip("`").strip("'").strip('"').rstrip("/")
-            for d in dirs_str.split(",")
-            if d.strip()
-        ]
+        dirs: list[str] = []
+        for raw in dirs_str.split(","):
+            normalized = _normalize_dir(raw, valid_dirs)
+            if normalized is not None:
+                dirs.append(normalized)
         clean_dirs: list[str] = []
         for d in dirs:
             if not any(
