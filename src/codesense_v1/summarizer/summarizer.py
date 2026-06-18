@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import os
 import re
 from pathlib import Path
 
@@ -20,6 +21,50 @@ _NAME_MAX_LEN = 20
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
+_INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
+_DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
+
+
+def _get_include_roots() -> tuple[str, ...]:
+    """Return the directory roots to be included in module analysis.
+
+    Read from env var ``CODESENSE_INCLUDE_DIRS`` (comma-separated). Defaults to
+    ``("src",)``. Empty/whitespace values fall back to the default. Trailing
+    slashes and backslashes are normalised so ``"src/"``/``"src\\"`` are
+    accepted equivalents.
+    """
+    raw = os.environ.get(_INCLUDE_DIRS_ENV, "")
+    parts = [
+        r.strip().replace("\\", "/").rstrip("/")
+        for r in raw.split(",")
+        if r.strip()
+    ]
+    parts = [p for p in parts if p]
+    return tuple(parts) if parts else _DEFAULT_INCLUDE_ROOTS
+
+
+def _is_under_roots(d: str, roots: tuple[str, ...]) -> bool:
+    """Return True if directory *d* equals or is nested under any root."""
+    d_norm = d.replace("\\", "/").rstrip("/")
+    return any(d_norm == r or d_norm.startswith(r + "/") for r in roots)
+
+
+def _filter_dir_deps(
+    dir_deps: dict[str, dict[str, list[str]]], roots: tuple[str, ...]
+) -> dict[str, dict[str, list[str]]]:
+    """Keep only edges where both source and target are under *roots*."""
+    out: dict[str, dict[str, list[str]]] = {}
+    for src, buckets in dir_deps.items():
+        if not _is_under_roots(src, roots):
+            continue
+        kept_buckets: dict[str, list[str]] = {}
+        for kind, targets in buckets.items():
+            kept = [t for t in targets if _is_under_roots(t, roots)]
+            if kept:
+                kept_buckets[kind] = kept
+        if kept_buckets:
+            out[src] = kept_buckets
+    return out
 
 
 def _leaf_dirs_from_files(file_paths: list[str]) -> set[str]:
@@ -98,12 +143,19 @@ async def project_map_summary(project_root: Path) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
+    roots = _get_include_roots()
+    all_file_paths = [
+        p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
+    ]
+    dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+    dir_deps = _filter_dir_deps(dir_deps, roots)
+
     valid_dirs: set[str] = (
         set(dir_deps.keys())
         | set(dir_syms.keys())
         | _leaf_dirs_from_files(all_file_paths)
     )
-    prompt = _build_project_map_prompt(dir_deps, dir_syms)
+    prompt = _build_project_map_prompt(dir_deps, dir_syms, roots=roots)
     modules_json = await _call_llm_for_modules(prompt, valid_dirs=valid_dirs)
 
     expanded = _expand_module_files(modules_json, all_file_paths)
@@ -475,8 +527,11 @@ def _render_project_map_markdown(
 def _build_project_map_prompt(
     dir_deps: dict[str, dict[str, list[str]]],
     dir_syms: dict[str, list[dict[str, str]]],
+    roots: tuple[str, ...] = _DEFAULT_INCLUDE_ROOTS,
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
+    n_dirs = len(all_dirs)
+    roots_str = "、".join(f"`{r}`" for r in roots)
 
     dir_lines: list[str] = []
     for d in all_dirs:
@@ -502,6 +557,13 @@ def _build_project_map_prompt(
     return (
         "# 项目模块划分请求\n\n"
         "你是一位软件架构师。根据以下项目结构数据，请你推断项目的逻辑模块划分。\n\n"
+        "## 上下文\n"
+        f"- 以下目录均位于产品源代码根（{roots_str}）下，是项目的核心实现，"
+        "已排除测试与脚手架。\n"
+        f"- 项目共 {n_dirs} 个目录，**默认假设：每个目录代表一个独立模块**，"
+        f"预期产出约 {n_dirs} 个模块。\n"
+        "- 仅当两个目录承担**完全相同**的职责且强耦合时，才可合并为同一模块；"
+        "语义不同的目录（如 errors、llm、cache）必须独立成模块。\n\n"
         "## 输入数据\n\n"
         "### 目录结构（含代表性符号，最多 50 个/目录）\n"
         f"{dir_section}\n\n"
@@ -518,7 +580,9 @@ def _build_project_map_prompt(
         "- 不要输出标题行、编号、Markdown 格式或任何其他内容\n"
         "- 目录路径为相对项目根的路径\n"
         "- 同一目录不归属多个模块\n"
-        "- 覆盖所有非平凡目录\n"
+        "- 必须覆盖所有目录\n"
+        "- **禁止把所有目录归到单一模块**（这是错误划分；至少 2 个模块）\n"
+        "- 模块名 2-20 个字符；不得包含重复词或与描述列粘连\n"
     )
 
 
