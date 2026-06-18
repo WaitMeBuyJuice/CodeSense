@@ -531,7 +531,6 @@ def _build_project_map_prompt(
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
     n_dirs = len(all_dirs)
-    min_modules = max(2, (n_dirs + 1) // 2)
     roots_str = "、".join(f"`{r}`" for r in roots)
 
     dir_lines: list[str] = []
@@ -582,7 +581,7 @@ def _build_project_map_prompt(
         "- 目录路径为相对项目根的路径\n"
         "- 同一目录不归属多个模块\n"
         "- 必须覆盖所有目录\n"
-        f"- 至少产出 {min_modules} 个模块；**禁止把所有目录归到单一模块**\n"
+        "- **禁止把所有目录归到单一模块**（这是错误划分；至少 2 个模块）\n"
         "- 模块名 2-20 个字符；不得包含重复词或与描述列粘连\n"
     )
 

@@ -623,15 +623,14 @@ def test_filter_dir_deps_removes_empty_buckets() -> None:
 # ---- _build_project_map_prompt hints (anti "all-in-one" hallucination) ------
 
 
-def test_build_project_map_prompt_includes_min_modules_floor() -> None:
-    """Prompt 必须告诉 LLM 至少产出 N 个模块，避免被弱模型一锅烩。"""
+def test_build_project_map_prompt_forbids_single_module() -> None:
+    """Prompt 必须明确禁止把所有目录归到单一模块（防一锅烩）。"""
     from codesense_v1.summarizer.summarizer import _build_project_map_prompt
 
-    # 9 个目录 → min_modules = max(2, (9+1)//2) = 5
     dir_syms = {f"src/d{i}": [] for i in range(9)}
     prompt = _build_project_map_prompt({}, dir_syms, roots=("src",))
-    assert "至少产出 5 个模块" in prompt
     assert "禁止把所有目录归到单一模块" in prompt
+    assert "至少 2 个模块" in prompt
 
 
 def test_build_project_map_prompt_marks_roots_in_context() -> None:
