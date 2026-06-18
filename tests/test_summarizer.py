@@ -350,17 +350,17 @@ def test_parse_modules_text_skips_no_pipe_lines() -> None:
 def test_parse_modules_text_deduplicates_names() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text
 
-    result = _parse_modules_text("A|desc|src/a\na|desc2|src/b")
+    result = _parse_modules_text("AA|desc|src/a\naa|desc2|src/b")
     assert len(result) == 1
-    assert result[0]["name"] == "A"
+    assert result[0]["name"] == "AA"
 
 
 def test_parse_modules_text_skips_overlapping_dirs() -> None:
     from codesense_v1.summarizer.summarizer import _parse_modules_text
 
-    result = _parse_modules_text("A|desc|src\nB|desc|src/sub")
+    result = _parse_modules_text("AA|desc|src\nBB|desc|src/sub")
     assert len(result) == 1
-    assert result[0]["name"] == "A"
+    assert result[0]["name"] == "AA"
 
 
 def test_parse_modules_text_empty_returns_empty() -> None:
@@ -385,6 +385,179 @@ def test_parse_modules_text_multi_module(tmp_path: Any) -> None:
     names = [r["name"] for r in result]
     assert "缓存层" in names
     assert "数据层" in names
+
+
+# ---- _parse_modules_text validation (valid_dirs) ----------------------------
+
+
+def test_parse_modules_text_filters_invalid_dirs() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/a", "src/b"}
+    result = _parse_modules_text("MM|desc|src/a,src/typo_xyz", valid_dirs=valid)
+    assert len(result) == 1
+    assert result[0]["directories"] == ["src/a"]
+
+
+def test_parse_modules_text_drops_row_when_all_dirs_invalid() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/a"}
+    result = _parse_modules_text("Junk|desc|completely_wrong_xyz", valid_dirs=valid)
+    assert result == []
+
+
+def test_parse_modules_text_fuzzy_corrects_typo() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    valid = {"src/codesense_v1/errors"}
+    # 缺少斜杠的常见 LLM 拼写错
+    result = _parse_modules_text(
+        "Errors|desc|src/codesense_v1/erorrs", valid_dirs=valid
+    )
+    assert len(result) == 1
+    assert result[0]["directories"] == ["src/codesense_v1/errors"]
+
+
+def test_parse_modules_text_dedups_description() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    result = _parse_modules_text("工具层|add、explore、add、list|src/tools")
+    assert result[0]["description"] == "add、explore、list"
+
+
+def test_parse_modules_text_truncates_long_description() -> None:
+    from codesense_v1.summarizer.summarizer import _parse_modules_text, _DESC_MAX_LEN
+
+    long_desc = "x" * 200
+    result = _parse_modules_text(f"MM|{long_desc}|src/a")
+    assert len(result[0]["description"]) <= _DESC_MAX_LEN
+
+
+def test_parse_modules_text_rejects_too_short_name() -> None:
+    """单字模块名（LLM 截断产物，如'层'）应被丢弃。"""
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    result = _parse_modules_text("层|desc|src/a\n工具层|desc|src/b")
+    names = [m["name"] for m in result]
+    assert "层" not in names
+    assert "工具层" in names
+
+
+def test_parse_modules_text_rejects_too_long_name() -> None:
+    """过长模块名（LLM 把描述串到名称列）应被丢弃。"""
+    from codesense_v1.summarizer.summarizer import _parse_modules_text
+
+    long_name = "资源" * 20  # 40 chars
+    result = _parse_modules_text(f"{long_name}|desc|src/a")
+    assert result == []
+
+
+# ---- _leaf_dirs_from_files --------------------------------------------------
+
+
+def test_leaf_dirs_from_files_returns_only_leaves() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    files = [
+        "src/codesense_v1/__init__.py",
+        "src/codesense_v1/cache/cache.py",
+        "src/codesense_v1/schemas/schemas.py",
+    ]
+    result = _leaf_dirs_from_files(files)
+    # src/codesense_v1 是 cache/schemas 的父目录，应被剔除
+    assert result == {"src/codesense_v1/cache", "src/codesense_v1/schemas"}
+
+
+def test_leaf_dirs_from_files_handles_windows_separator() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    files = ["src\\codesense_v1\\schemas\\schemas.py"]
+    result = _leaf_dirs_from_files(files)
+    assert result == {"src/codesense_v1/schemas"}
+
+
+def test_leaf_dirs_from_files_ignores_top_level_files() -> None:
+    from codesense_v1.summarizer.summarizer import _leaf_dirs_from_files
+
+    assert _leaf_dirs_from_files(["README.md"]) == set()
+
+
+# ---- _call_llm_for_modules coverage repair ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_fills_missing_dirs() -> None:
+    from codesense_v1.summarizer.summarizer import _call_llm_for_modules
+
+    valid = {"src/a", "src/b", "src/schemas"}
+    # 首轮漏 src/schemas；补齐轮把它归到新模块"Schemas"
+    responses = iter(
+        [
+            "ModA|desc|src/a\nModB|desc|src/b",
+            "Schemas|描述|src/schemas",
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    covered = {d for m in result for d in m["directories"]}
+    assert covered == valid
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_appends_fallback_when_repair_fails() -> None:
+    from codesense_v1.summarizer.summarizer import (
+        _FALLBACK_MODULE_NAME,
+        _call_llm_for_modules,
+    )
+
+    valid = {"src/a", "src/orphan"}
+    responses = iter(
+        [
+            "ModA|desc|src/a",
+            "",  # 补齐轮 LLM 不配合，仍漏 src/orphan
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    names = [m["name"] for m in result]
+    assert _FALLBACK_MODULE_NAME in names
+    fallback = next(m for m in result if m["name"] == _FALLBACK_MODULE_NAME)
+    assert "src/orphan" in fallback["directories"]
+
+
+@pytest.mark.asyncio
+async def test_call_llm_for_modules_repair_extends_existing_module() -> None:
+    """补齐轮若复用已有模块名，新目录应合并进该模块，不创建重复模块。"""
+    from codesense_v1.summarizer.summarizer import _call_llm_for_modules
+
+    valid = {"src/a", "src/extra"}
+    responses = iter(
+        [
+            "ModA|desc|src/a",
+            "ModA|desc|src/extra",
+        ]
+    )
+
+    async def fake_call(_prompt: str) -> str:
+        return next(responses)
+
+    with patch(_LLM_CALL, side_effect=fake_call):
+        result = await _call_llm_for_modules("init prompt", valid_dirs=valid)
+
+    mod_a = [m for m in result if m["name"] == "ModA"]
+    assert len(mod_a) == 1
+    assert set(mod_a[0]["directories"]) == {"src/a", "src/extra"}
 
 
 # ---- dummy to satisfy Any annotation ---------------------------------------
