@@ -18,7 +18,7 @@
 
 **Ground Truth（已 grep 验证 python 注册点反推）**：
 
-### 必须列出的核心改动点（共 4 个文件）：
+### 必须列出的核心改动点（共 4 个文件，权重 1.0）：
 
 | # | 文件 | 改动内容 |
 |---|------|---------|
@@ -27,7 +27,7 @@
 | 3 | `src/extraction/languages/erlang.ts` | **新建**：实现 `erlangExtractor`（参考 `python.ts` / `go.ts`） |
 | 4 | `src/extraction/languages/index.ts` | 导入 `erlangExtractor` 并注册到 `extractors` 映射 |
 
-### 推荐列出的改动点（共 2 个文件）：
+### 推荐列出的改动点（共 2 个文件，权重 0.5）：
 
 | # | 文件 | 改动内容 |
 |---|------|---------|
@@ -36,13 +36,12 @@
 
 ### 评分标准：
 
-- **核心 4 个文件**（grammars / types / languages/erlang.ts / languages/index.ts）：算找全率分母
-- **推荐 2 个文件**（import-resolver / strip-comments）：作为加分项，不算分母
+- **核心 4 个文件**（grammars / types / languages/erlang.ts / languages/index.ts）：权重 1.0
+- **推荐 2 个文件**（import-resolver / strip-comments）：权重 0.5
 - **不该提**：mcp/ 子系统（与语言扩展无关）、graph/ 子系统（与语言扩展无关）
 
-**Ground Truth 找全率公式**：
-- 核心找全率 = 命中核心文件数 / 4
-- 加分项 = 是否提到 resolution 层的影响
+**Ground Truth 加权找全率公式**：
+- 加权找全率 = (命中核心数 + 0.5 × 命中推荐数) / (4 + 0.5 × 2) = (命中核心数 + 0.5 × 命中推荐数) / 5
 
 **实验次数**：每组 3 次（关键任务）
 
@@ -84,13 +83,13 @@
 
 本任务的标准答案清单：
 
-**核心必改文件（共 4 个）——找全率分母**：
+**核心必改文件（共 4 个）——权重 1.0**：
 1. src/extraction/grammars.ts（添加 erlang wasm 映射、.erl/.hrl 扩展名、显示名）
 2. src/types.ts（语言枚举加 'erlang'）
 3. src/extraction/languages/erlang.ts（新建 erlangExtractor，参考 python.ts/go.ts）
 4. src/extraction/languages/index.ts（导入并注册 erlangExtractor）
 
-**推荐提及的文件（共 2 个）——加分项，不算分母**：
+**推荐提及的文件（共 2 个）——权重 0.5**：
 5. src/resolution/import-resolver.ts（添加 -include 等 Erlang import 规则）
 6. src/resolution/strip-comments.ts（添加 % 注释剥离）
 
@@ -104,8 +103,8 @@
 |------|------|
 | 核心 GT 总数 | 4 |
 | 你提到的核心文件命中数（/4） | ? |
-| 核心找全率 | ? |
 | 你提到的推荐文件命中数（/2） | ? |
+| **加权找全率** = (命中核心 + 0.5×命中推荐) / 5 | ? |
 | 你提到的与语言扩展无关的文件数（误改） | ? |
 | 漏提的核心文件清单 | ? |
 | 误提的无关文件清单 | ? |
@@ -132,8 +131,9 @@
 
 | 指标 | 组1 第1次 | 组1 第2次 | 组1 第3次 | 组1 中位 | 组2 中位 | 组3 中位 | 组4 中位 |
 |------|---|---|---|---|---|---|---|
-| 核心找全率（/4） | | | | | | | |
-| 推荐项加分（/2） | | | | | | | |
+| 命中核心数（/4） | | | | | | | |
+| 命中推荐数（/2） | | | | | | | |
+| 加权找全率（/5） | | | | | | | |
 | 误提文件数 | | | | | | | |
 
 ### 3.3 关键观察：是否找到现有语言的注册模式
