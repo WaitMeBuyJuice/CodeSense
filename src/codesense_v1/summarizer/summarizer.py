@@ -22,7 +22,13 @@ _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
 _INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
+_CACHE_AUTO_EXPIRE_ENV = "CODESENSE_CACHE_AUTO_EXPIRE"
 _DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
+
+
+def _is_auto_expire_enabled() -> bool:
+    """Return True iff CODESENSE_CACHE_AUTO_EXPIRE is explicitly set to 'true' (case-insensitive)."""
+    return os.environ.get(_CACHE_AUTO_EXPIRE_ENV, "").strip().lower() == "true"
 
 
 def _get_include_roots() -> tuple[str, ...]:
@@ -127,12 +133,17 @@ async def project_map_summary(project_root: Path) -> str:
 
     current_hash = cache.db_hash(db_path)
 
-    if cache.is_cache_valid(codesense_dir, current_hash):
+    if _is_auto_expire_enabled():
+        if cache.is_cache_valid(codesense_dir, current_hash):
+            cached = cache.read_project_map(codesense_dir)
+            if cached is not None:
+                return cached
+        else:
+            cache.invalidate(codesense_dir)
+    else:
         cached = cache.read_project_map(codesense_dir)
         if cached is not None:
             return cached
-    else:
-        cache.invalidate(codesense_dir)
 
     with CodeGraphDB(project_root) as db:
         modules_data = list_modules(db)
@@ -185,12 +196,17 @@ async def module_summary(project_root: Path, module_name: str) -> str:
     current_hash = cache.db_hash(db_path)
     mkey = cache.safe_key(module_name)
 
-    if cache.is_cache_valid(codesense_dir, current_hash):
+    if _is_auto_expire_enabled():
+        if cache.is_cache_valid(codesense_dir, current_hash):
+            cached = cache.read_module(codesense_dir, mkey)
+            if cached is not None:
+                return cached
+        else:
+            cache.invalidate(codesense_dir)
+    else:
         cached = cache.read_module(codesense_dir, mkey)
         if cached is not None:
             return cached
-    else:
-        cache.invalidate(codesense_dir)
 
     index = cache.read_modules_index(codesense_dir)
     if index is None:
