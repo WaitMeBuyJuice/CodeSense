@@ -121,7 +121,7 @@ async def dispatch(name: str, arguments: dict[str, object]) -> CallToolResult:
     except ToolError as e:
         return _error(e.message)
     except Exception as e:
-        return _error(f"内部错误：{type(e).__name__}")
+        return _error(f"内部错误：{type(e).__name__}: {e}")
 
     return CallToolResult(
         content=[TextContent(type="text", text=str(result))],
