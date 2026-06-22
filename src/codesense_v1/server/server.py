@@ -21,22 +21,23 @@ CodeSense provides architecture-level understanding built on top of CodeGraph \
 "who calls this function" questions.
 
 Tools:
-- project_map (Resource): Project-wide overview — module list, \
-one-line descriptions, cross-module dependencies. Read this resource \
+- project_map_tool (Tool): Project-wide overview — module list, \
+one-line descriptions, cross-module dependencies. Call this tool \
 whenever you start on an unfamiliar codebase or need to locate \
-which module owns a feature.
+which module owns a feature. Prefer this over the codesense://project_map \
+resource, which is currently disabled due to client-side timeout limits.
 - explore_module (Tool): Module-level deep dive — public interface, internal files, \
 dependency modules. Call this before modifying any module, or when you need to \
 understand a module's boundaries and contracts.
 
 When to use what:
-- Starting a new task or unfamiliar with the codebase → read project_map resource first
+- Starting a new task or unfamiliar with the codebase → call project_map_tool first
 - About to modify a module → call explore_module for that module first
 - Need a specific symbol or call chain → use CodeGraph MCP tools \
 (symbol lookup, callers, call chains)
 - Need exact code text → use grep / read_file
 
-Prefer high-to-low abstraction: project_map → explore_module → codegraph → grep/read_file. \
+Prefer high-to-low abstraction: project_map_tool → explore_module → codegraph → grep/read_file. \
 Avoid jumping straight to grep for architecture questions — but direct grep/read_file is \
 fine when you already know the exact symbol or file.\
 """
@@ -69,7 +70,12 @@ def build_server() -> Server:
 
     @server.read_resource()  # type: ignore[no-untyped-call, untyped-decorator]
     async def _read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
-        content = await _pm.read_project_map()
+        content = (
+            "# 提示\n\n"
+            "`codesense://project_map` 资源当前已停用（存在客户端超时限制）。\n\n"
+            "请改用 **`project_map_tool`** 工具获取完全相同的项目架构概览，"
+            "该工具支持更长的超时时间，可正常完成 LLM 调用。"
+        )
         return [ReadResourceContents(content=content, mime_type=_pm.RESOURCE_MIME_TYPE)]
 
     return server
