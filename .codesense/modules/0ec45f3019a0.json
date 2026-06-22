@@ -1,5 +1,0 @@
-{
-  "module_name": "工具模块",
-  "summary": "# 模块理解文档：工具模块\n\n## 1. 一句话描述\n提供跨模块调用的通用辅助函数与方法。\n\n## 2. 对外接口\n该模块对外暴露以下函数（均不以 `_` 开头，视为公开接口）：\n\n- **`add(a: float, b: float) -> str`**  \n  提供基础的加法计算辅助功能。\n- **`explore_module(module_name: str) -> str`**  \n  探索并获取指定名称模块的相关信息。\n- **`list_cached() -> str`**  \n  列出当前已缓存的内容。\n- **`list_cached_modules() -> str`**  \n  列出当前已缓存的模块列表。\n- **`project_map_tool() -> str`**  \n  获取或生成项目结构映射信息。\n\n## 3. 内部文件\n- `src/codesense_v1/tools/__init__.py`  \n  模块的初始化文件，用于将当前目录标识为 Python 包。\n- `src/codesense_v1/tools/add.py`  \n  实现基础的数值相加辅助函数 `add`。\n- `src/codesense_v1/tools/explore_module.py`  \n  实现探索指定模块信息的函数 `explore_module`。\n- `src/codesense_v1/tools/list_cached.py`  \n  实现获取已缓存内容列表的函数 `list_cached`。\n- `src/codesense_v1/tools/list_cached_modules.py`  \n  实现获取已缓存模块列表的函数 `list_cached_modules`。\n- `src/codesense_v1/tools/project_map_tool.py`  \n  实现获取项目结构映射信息的函数 `project_map_tool`。\n\n## 4. 依赖关系\n- **上游（依赖的目录）**：\n  - `src/codesense_v1`\n  - `src/codesense_v1/registry`\n  - `src/codesense_v1/summarizer`\n- **下游（被依赖的目录）**：\n  - `tests`",
-  "generated_at": "2026-06-22T06:57:31.741161+00:00"
-}

@@ -15,7 +15,7 @@
 | 检索（grep_search + glob_search + list_files_*） | ? |
 | 阅读（read_file） | ? |
 | 改动（edit + write，去重后的不同文件数） | ? |
-| CodeSense: project_map（access_mcp_resource codesense://project_map） | ? |
+| CodeSense: project_map_tool（use_mcp_tool） | ? |
 | CodeSense: explore_module（use_mcp_tool） | ? |
 | CodeGraph 工具合计（codegraph_*） | ? |
 | 总工具调用 | ? |
@@ -30,7 +30,7 @@
 （逐行列出，相对项目根目录）
 ```
 
-### 工具调用序列（最多 30 条）
+### 工具调用序列（最多 50 条）
 
 按调用顺序列出关键工具调用，便于事后判断"假饱和"：
 

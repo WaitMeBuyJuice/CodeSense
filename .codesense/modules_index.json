@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-22T06:55:55.307983+00:00",
+  "generated_at": "2026-06-22T06:27:54.274551+00:00",
   "modules": [
     {
       "name": "公共异常",
-      "description": "定义项目通用异常与错误类型",
+      "description": "定义项目共享的异常类型与基础常量",
       "directories": [
         "src/codesense_v1"
       ],
@@ -38,7 +38,7 @@
     },
     {
       "name": "缓存模块",
-      "description": "提供系统数据缓存与读取加速机制",
+      "description": "负责分析结果、LLM响应等数据的缓存管理、避免重复计算与调用",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -49,7 +49,7 @@
     },
     {
       "name": "数据模块",
-      "description": "定义核心数据结构并处理数据流转",
+      "description": "定义核心数据模型、数据集加载与持久化接口",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -62,8 +62,8 @@
       ]
     },
     {
-      "name": "模型调用模块",
-      "description": "封装大语言模型的请求与交互逻辑",
+      "name": "LLM模块",
+      "description": "封装大语言模型调用、Prompt构建、结果解析与错误处理",
       "directories": [
         "src/codesense_v1/llm"
       ],
@@ -73,8 +73,8 @@
       ]
     },
     {
-      "name": "注册中心模块",
-      "description": "管理系统内部组件和工具的注册与发现",
+      "name": "注册管理模块",
+      "description": "负责组件、模型与工具的注册、发现及生命周期管理",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -85,7 +85,7 @@
     },
     {
       "name": "资源模块",
-      "description": "负责静态资源文件和配置项的加载与管理",
+      "description": "管理配置文件、模板、静态资源等辅助文件",
       "directories": [
         "src/codesense_v1/resources"
       ],
@@ -95,8 +95,8 @@
       ]
     },
     {
-      "name": "服务端模块",
-      "description": "提供对外API接口并承载核心服务运行",
+      "name": "服务模块",
+      "description": "对外提供HTTP/RPC服务接口及服务的启动与停止管理",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -108,7 +108,7 @@
     },
     {
       "name": "摘要模块",
-      "description": "实现代码或文本内容的总结与提取",
+      "description": "基于代码信息或LLM输出生成并输出摘要结果",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -119,7 +119,7 @@
     },
     {
       "name": "工具模块",
-      "description": "提供跨模块调用的通用辅助函数与方法",
+      "description": "封装可调用工具集合及其执行、参数解析与结果返回",
       "directories": [
         "src/codesense_v1/tools"
       ],
