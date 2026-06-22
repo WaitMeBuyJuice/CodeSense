@@ -32,7 +32,7 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "不适用场景：仅需定位模块位置（用 project_map 即可）、"
         "已知确切文件路径或符号名（直接 grep/read_file）。"
         "参数：module_name 是 project_map 中列出的模块名。"
-        "如果不知道有哪些模块，请先读取 codesense://project_map 资源。"
+        "如果不知道有哪些模块，请先调用 project_map_tool 或读取 codesense://project_map 资源。"
         "返回结果由 LLM 生成，准确性依赖 project_map 阶段的模块划分。"
     ),
     input_schema=_EXPLORE_MODULE_INPUT_SCHEMA,
