@@ -6,30 +6,30 @@
 
 | 模块 | 职责 | 主要目录 |
 |------|------|---------|
-| 公共异常 | 定义项目共享的异常类型与基础常量 | `src/codesense_v1` |
-| 缓存模块 | 负责分析结果、LLM响应等数据的缓存管理、避免重复计算与调用 | `src/codesense_v1/cache` |
-| 数据模块 | 定义核心数据模型、数据集加载与持久化接口 | `src/codesense_v1/data` |
-| LLM模块 | 封装大语言模型调用、Prompt构建、结果解析与错误处理 | `src/codesense_v1/llm` |
-| 注册管理模块 | 负责组件、模型与工具的注册、发现及生命周期管理 | `src/codesense_v1/registry` |
-| 资源模块 | 管理配置文件、模板、静态资源等辅助文件 | `src/codesense_v1/resources` |
-| 服务模块 | 对外提供HTTP/RPC服务接口及服务的启动与停止管理 | `src/codesense_v1/server` |
-| 摘要模块 | 基于代码信息或LLM输出生成并输出摘要结果 | `src/codesense_v1/summarizer` |
-| 工具模块 | 封装可调用工具集合及其执行、参数解析与结果返回 | `src/codesense_v1/tools` |
+| 错误定义 | 定义工具与LLM相关错误类型 | `src/codesense_v1` |
+| 缓存管理 | 提供查询结果与中间数据的缓存能力 | `src/codesense_v1/cache` |
+| 数据管理 | 加载、组织并提供代码库相关数据访问 | `src/codesense_v1/data` |
+| LLM交互 | 封装大语言模型调用、提示构造与响应处理 | `src/codesense_v1/llm` |
+| 注册中心 | 统一注册和发现工具、资源等服务能力 | `src/codesense_v1/registry` |
+| MCP资源 | 定义并对外暴露可读的MCP资源 | `src/codesense_v1/resources` |
+| MCP服务端 | 启动MCP服务并协调请求、工具与资源调度 | `src/codesense_v1/server` |
+| 摘要生成 | 对代码库或代码实体生成结构化摘要 | `src/codesense_v1/summarizer` |
+| 工具实现 | 定义并执行代码分析相关的MCP工具 | `src/codesense_v1/tools` |
 
 ## 模块间依赖
 
 | 来源模块 | 依赖模块 | 依赖类型 |
 |----------|----------|----------|
-| LLM模块 | 公共异常 | imports |
-| 工具模块 | 公共异常 | imports |
-| 工具模块 | 摘要模块 | imports |
-| 工具模块 | 注册管理模块 | imports |
-| 摘要模块 | LLM模块 | imports |
-| 摘要模块 | 公共异常 | imports |
-| 摘要模块 | 数据模块 | imports |
-| 摘要模块 | 缓存模块 | imports |
-| 服务模块 | 注册管理模块 | imports |
-| 服务模块 | 资源模块 | imports |
-| 注册管理模块 | 公共异常 | imports |
-| 资源模块 | 公共异常 | imports |
-| 资源模块 | 摘要模块 | imports |
+| LLM交互 | 错误定义 | imports |
+| MCP服务端 | MCP资源 | imports |
+| MCP服务端 | 注册中心 | imports |
+| MCP资源 | 摘要生成 | imports |
+| MCP资源 | 错误定义 | imports |
+| 工具实现 | 摘要生成 | imports |
+| 工具实现 | 注册中心 | imports |
+| 工具实现 | 错误定义 | imports |
+| 摘要生成 | LLM交互 | imports |
+| 摘要生成 | 数据管理 | imports |
+| 摘要生成 | 缓存管理 | imports |
+| 摘要生成 | 错误定义 | imports |
+| 注册中心 | 错误定义 | imports |

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-22T06:27:54.274551+00:00",
+  "generated_at": "2026-06-22T07:56:47.876937+00:00",
   "modules": [
     {
-      "name": "公共异常",
-      "description": "定义项目共享的异常类型与基础常量",
+      "name": "错误定义",
+      "description": "定义工具与LLM相关错误类型",
       "directories": [
         "src/codesense_v1"
       ],
@@ -37,8 +37,8 @@
       ]
     },
     {
-      "name": "缓存模块",
-      "description": "负责分析结果、LLM响应等数据的缓存管理、避免重复计算与调用",
+      "name": "缓存管理",
+      "description": "提供查询结果与中间数据的缓存能力",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -48,8 +48,8 @@
       ]
     },
     {
-      "name": "数据模块",
-      "description": "定义核心数据模型、数据集加载与持久化接口",
+      "name": "数据管理",
+      "description": "加载、组织并提供代码库相关数据访问",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -62,8 +62,8 @@
       ]
     },
     {
-      "name": "LLM模块",
-      "description": "封装大语言模型调用、Prompt构建、结果解析与错误处理",
+      "name": "LLM交互",
+      "description": "封装大语言模型调用、提示构造与响应处理",
       "directories": [
         "src/codesense_v1/llm"
       ],
@@ -73,8 +73,8 @@
       ]
     },
     {
-      "name": "注册管理模块",
-      "description": "负责组件、模型与工具的注册、发现及生命周期管理",
+      "name": "注册中心",
+      "description": "统一注册和发现工具、资源等服务能力",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -84,8 +84,8 @@
       ]
     },
     {
-      "name": "资源模块",
-      "description": "管理配置文件、模板、静态资源等辅助文件",
+      "name": "MCP资源",
+      "description": "定义并对外暴露可读的MCP资源",
       "directories": [
         "src/codesense_v1/resources"
       ],
@@ -95,8 +95,8 @@
       ]
     },
     {
-      "name": "服务模块",
-      "description": "对外提供HTTP/RPC服务接口及服务的启动与停止管理",
+      "name": "MCP服务端",
+      "description": "启动MCP服务并协调请求、工具与资源调度",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -107,8 +107,8 @@
       ]
     },
     {
-      "name": "摘要模块",
-      "description": "基于代码信息或LLM输出生成并输出摘要结果",
+      "name": "摘要生成",
+      "description": "对代码库或代码实体生成结构化摘要",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -118,8 +118,8 @@
       ]
     },
     {
-      "name": "工具模块",
-      "description": "封装可调用工具集合及其执行、参数解析与结果返回",
+      "name": "工具实现",
+      "description": "定义并执行代码分析相关的MCP工具",
       "directories": [
         "src/codesense_v1/tools"
       ],
