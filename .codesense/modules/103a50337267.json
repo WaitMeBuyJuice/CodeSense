@@ -1,0 +1,5 @@
+{
+  "module_name": "错误定义",
+  "summary": "# 模块理解文档：错误定义\n\n## 1. 一句话描述\n定义工具与 LLM 相关的核心错误异常类型。\n\n## 2. 对外接口\n该模块对外暴露以下异常类：\n- `ToolError`：工具执行过程中发生错误时的基础异常类。\n- `ValidationError`：数据或参数验证失败时抛出的异常类。\n- `InvalidArgumentError`：接收到无效参数时抛出的异常类。\n- `LLMError`：与大型语言模型（LLM）交互时发生错误的异常类。\n\n## 3. 内部文件\n- `src/codesense_v1/errors.py`：定义工具执行、参数校验以及 LLM 调用相关的各种错误异常类。\n\n## 4. 依赖关系\n- **上游**：（无）\n- **下游**：\n  - `src/codesense_v1/llm`\n  - `src/codesense_v1/registry`\n  - `src/codesense_v1/resources`\n  - `src/codesense_v1/summarizer`\n  - `src/codesense_v1/tools`\n  - `tests`",
+  "generated_at": "2026-06-22T11:00:50.492882+00:00"
+}

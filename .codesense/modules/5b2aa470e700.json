@@ -1,0 +1,5 @@
+{
+  "module_name": "LLM交互",
+  "summary": "# 模块理解文档：LLM交互\n\n## 1. 一句话描述\n封装大语言模型调用、提示构造与响应处理。\n\n## 2. 对外接口\n- **`call_llm`** (function): `(prompt: str) -> str`\n  *功能描述：接收提示词字符串，调用大语言模型并返回生成的响应字符串。*\n\n## 3. 内部文件\n- `src/codesense_v1/llm/__init__.py`: 模块初始化文件，用于将当前目录标记为 Python 包。\n- `src/codesense_v1/llm/llm.py`: 核心实现文件，包含大语言模型调用的具体逻辑与 `call_llm` 函数定义。\n\n## 4. 依赖关系\n- **上游依赖（该模块依赖的目录）**:\n  - `src/codesense_v1`\n- **下游依赖（依赖该模块的目录）**:\n  - `src/codesense_v1/summarizer`\n  - `tests`",
+  "generated_at": "2026-06-22T10:59:45.724989+00:00"
+}
