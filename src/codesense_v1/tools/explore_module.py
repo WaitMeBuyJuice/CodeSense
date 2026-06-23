@@ -27,7 +27,7 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
     name="explore_module",
     description=(
         "返回指定模块的架构理解：一句话描述、对外接口、内部文件、依赖模块。"
-        "适用场景：询问某模块的作用或策略、改动某模块前需先了解其结构和接口契约、"
+        "适用场景：需要了解某模块、探寻某模块的作用或策略、改动某模块前需先了解其结构和接口契约、"
         "理解模块间依赖关系。"
         "不适用场景：仅需定位模块位置（用 project_map 即可）、"
         "已知确切文件路径或符号名（直接 grep/read_file）。"
