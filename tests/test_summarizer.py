@@ -226,7 +226,7 @@ async def test_module_summary_name_case_insensitive(tmp_path: Path) -> None:
 
 
 async def test_module_summary_cache_hit(tmp_path: Path) -> None:
-    """Cache valid + module cache present → no LLM call."""
+    """Cache valid + module cache present + hash match → no LLM call."""
     project_root = _setup_project(tmp_path)
     from codesense_v1 import cache as _cache
     from codesense_v1.data.db import DB_RELATIVE_PATH
@@ -239,7 +239,19 @@ async def test_module_summary_cache_hit(tmp_path: Path) -> None:
     mkey = _cache.safe_key("缓存层")
     _cache.write_module(cs_dir, mkey, "缓存层", "# cached module", h)
 
-    with patch(_LLM_CALL, new_callable=AsyncMock) as mock_llm:
+    # Pre-store a matching module hash using the same entry as _write_valid_index
+    # and the same DB mock (iter_nodes returns []).
+    db_ctx = _make_db_mock()
+    from codesense_v1.summarizer.summarizer import _compute_module_hash
+    entry = {
+        "name": "缓存层",
+        "files": ["src/cache/cache.py"],
+        "directories": ["src/cache"],
+    }
+    fake_module_hash = _compute_module_hash(entry, db_ctx.__enter__())
+    _cache.write_module_hash(cs_dir, mkey, fake_module_hash)
+
+    with patch(_CG_DB, return_value=db_ctx), patch(_LLM_CALL, new_callable=AsyncMock) as mock_llm:
         result = await summarizer.module_summary(project_root, "缓存层")
 
     assert result == "# cached module"

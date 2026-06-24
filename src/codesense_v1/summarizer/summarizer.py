@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -178,8 +179,29 @@ async def project_map_summary(project_root: Path) -> str:
     return markdown
 
 
+def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
+    """Return a stable hash representing this module's current content.
+
+    Hash input: sorted file list + sorted symbol fingerprints (file:name:kind:sig).
+    Changes when files are added/removed or any symbol signature changes.
+    """
+    files = sorted(str(f) for f in (entry.get("files") or []))
+    file_set = set(files)
+    symbols: list[str] = []
+    for node in db.iter_nodes(kinds=("function", "class", "method")):
+        fp = node.file_path.replace("\\", "/")
+        if fp in file_set:
+            symbols.append(f"{fp}:{node.name}:{node.kind}:{node.signature or ''}")
+    symbols.sort()
+    content = "\n".join(files + symbols)
+    return hashlib.sha1(content.encode("utf-8")).hexdigest()  # noqa: S324
+
+
 async def module_summary(project_root: Path, module_name: str) -> str:
     """Return module-level summary as Markdown for *module_name*.
+
+    Cache invalidation is per-module: only regenerates when the module's own
+    files or symbols change, regardless of global DB hash.
 
     *module_name* must match a name in ``.codesense/modules_index.json``
     (case-insensitive, trimmed).  If the index does not exist yet, raises
@@ -195,18 +217,6 @@ async def module_summary(project_root: Path, module_name: str) -> str:
 
     current_hash = cache.db_hash(db_path)
     mkey = cache.safe_key(module_name)
-
-    if _is_auto_expire_enabled():
-        if cache.is_cache_valid(codesense_dir, current_hash):
-            cached = cache.read_module(codesense_dir, mkey)
-            if cached is not None:
-                return cached
-        else:
-            cache.invalidate(codesense_dir)
-    else:
-        cached = cache.read_module(codesense_dir, mkey)
-        if cached is not None:
-            return cached
 
     index = cache.read_modules_index(codesense_dir)
     if index is None:
@@ -236,6 +246,14 @@ async def module_summary(project_root: Path, module_name: str) -> str:
         )
 
     with CodeGraphDB(project_root) as db:
+        current_module_hash = _compute_module_hash(entry, db)
+
+        # Per-module cache check: only regenerate if this module's content changed
+        cached_md = cache.read_module(codesense_dir, mkey)
+        stored_hashes = cache.read_module_hashes(codesense_dir)
+        if cached_md is not None and stored_hashes.get(mkey) == current_module_hash:
+            return cached_md
+
         modules_data = list_modules(db)
         edges = module_dependencies(db, include_external=False)
         dir_deps = directory_dependencies(
@@ -256,7 +274,8 @@ async def module_summary(project_root: Path, module_name: str) -> str:
     prompt = _build_module_prompt(entry, dir_deps, file_symbols)
     summary = await llm.call_llm(prompt)
     cache.write_module(
-        codesense_dir, mkey, str(entry.get("name", module_name)), summary, current_hash
+        codesense_dir, mkey, str(entry.get("name", module_name)), summary,
+        current_hash, current_module_hash,
     )
     return summary
 
