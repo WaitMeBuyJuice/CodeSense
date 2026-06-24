@@ -88,8 +88,9 @@ async def test_explore_module_db_not_found(
     # No .codegraph/codegraph.db → FileNotFoundError → wrapped
     monkeypatch.setenv("CODESENSE_PROJECT_ROOT", str(project_root))
     result = await registry.dispatch("explore_module", {"module_name": "缓存层"})
-    assert result.isError
+    assert not result.isError
     assert "数据库不存在" in str(result.content)
+    assert "codegraph init" in str(result.content)
 
 
 async def test_explore_module_index_missing(
@@ -131,8 +132,9 @@ async def test_explore_module_llm_error(
     ):
         result = await registry.dispatch("explore_module", {"module_name": "缓存层"})
 
-    assert result.isError
+    assert not result.isError
     assert "api down" in str(result.content)
+    assert "LLM" in str(result.content)
 
 
 async def test_explore_module_success(

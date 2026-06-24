@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Final
 
 from codesense_v1 import summarizer
-from codesense_v1.errors import InvalidArgumentError
+from codesense_v1.errors import InvalidArgumentError, LLMError
 from codesense_v1.registry import tool
 
 _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
@@ -52,7 +52,15 @@ async def explore_module(module_name: str) -> str:
 
     try:
         return await summarizer.module_summary(project_root, module_name)
-    except FileNotFoundError as exc:
-        raise InvalidArgumentError(
-            f"内部错误：CodeGraph 数据库不存在，请先运行 codegraph init -i。({exc})"
-        ) from exc
+    except FileNotFoundError:
+        return (
+            "# 错误\n\n"
+            f"CodeGraph 数据库不存在（项目路径：{project_root}）。\n\n"
+            f"请先在该目录下运行 `codegraph init -i`，完成后重新调用 explore_module。"
+        )
+    except LLMError as exc:
+        return (
+            "# 错误\n\n"
+            f"LLM 调用失败：{exc}\n\n"
+            "请检查 `CODESENSE_LLM_API_KEY` 等环境变量配置。"
+        )
