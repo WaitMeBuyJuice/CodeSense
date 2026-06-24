@@ -84,9 +84,11 @@ def write_modules_index(
     codesense_dir: Path,
     modules: list[dict[str, object]],
     current_hash: str,
+    aux_dirs: list[dict[str, object]] | None = None,
 ) -> None:
     """Write ``modules_index.json``, prune stale module files, update ``meta.json``.
 
+    *aux_dirs* (optional) is stored under ``"auxiliary_dirs"`` for L2 directory info.
     Only removes ``.md`` files and hash entries for modules that no longer appear
     in the new index (by safe_key).  Existing module summaries for surviving
     modules are preserved so per-module invalidation can decide whether to
@@ -101,6 +103,8 @@ def write_modules_index(
         "generated_at": _now_iso(),
         "modules": modules,
     }
+    if aux_dirs is not None:
+        payload["auxiliary_dirs"] = aux_dirs
     (codesense_dir / _MODULES_INDEX_FILE).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

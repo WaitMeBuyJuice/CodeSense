@@ -26,19 +26,44 @@ _INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
 _CACHE_AUTO_EXPIRE_ENV = "CODESENSE_CACHE_AUTO_EXPIRE"
 _DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
 
+# Directories that should be listed briefly in project_map but not deeply analysed.
+_AUXILIARY_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        "test", "tests", "testing", "__tests__", "spec", "specs",
+        "script", "scripts",
+        "doc", "docs", "documentation", "dev-docs", "devdocs",
+        "example", "examples", "sample", "samples", "demo", "demos",
+    }
+)
+
+# Human-readable category labels for auxiliary dirs.
+_AUXILIARY_CATEGORY: dict[str, str] = {
+    "test": "测试代码", "tests": "测试代码", "testing": "测试代码",
+    "__tests__": "测试代码", "spec": "测试代码", "specs": "测试代码",
+    "script": "辅助脚本", "scripts": "辅助脚本",
+    "doc": "文档", "docs": "文档", "documentation": "文档",
+    "dev-docs": "文档", "devdocs": "文档",
+    "example": "示例代码", "examples": "示例代码",
+    "sample": "示例代码", "samples": "示例代码",
+    "demo": "示例代码", "demos": "示例代码",
+}
+
+# Regex to detect root-level filenames mistakenly treated as directories
+# (e.g. "vitest.config.mts/").
+_HAS_EXTENSION_RE = re.compile(r"\.[a-zA-Z0-9]+$")
+
 
 def _is_auto_expire_enabled() -> bool:
     """Return True iff CODESENSE_CACHE_AUTO_EXPIRE is explicitly set to 'true' (case-insensitive)."""
     return os.environ.get(_CACHE_AUTO_EXPIRE_ENV, "").strip().lower() == "true"
 
 
-def _get_include_roots() -> tuple[str, ...]:
-    """Return the directory roots to be included in module analysis.
+def _get_include_roots() -> tuple[str, ...] | None:
+    """Return user-configured include roots, or ``None`` if not configured.
 
-    Read from env var ``CODESENSE_INCLUDE_DIRS`` (comma-separated). Defaults to
-    ``("src",)``. Empty/whitespace values fall back to the default. Trailing
-    slashes and backslashes are normalised so ``"src/"``/``"src\\"`` are
-    accepted equivalents.
+    Read from ``CODESENSE_INCLUDE_DIRS`` (comma-separated).  ``None`` means
+    "auto-detect from DB"; an explicit empty string also returns ``None``
+    (treated as not configured).
     """
     raw = os.environ.get(_INCLUDE_DIRS_ENV, "")
     parts = [
@@ -47,7 +72,96 @@ def _get_include_roots() -> tuple[str, ...]:
         if r.strip()
     ]
     parts = [p for p in parts if p]
-    return tuple(parts) if parts else _DEFAULT_INCLUDE_ROOTS
+    return tuple(parts) if parts else None
+
+
+def _is_auxiliary_dir(name: str) -> str | None:
+    """Return a category label if *name* is an auxiliary directory, else ``None``.
+
+    Matches exact names and compound names whose tokens (split by ``_`` or ``-``)
+    include a known auxiliary pattern, e.g. ``js_tests`` → tests token → "测试代码".
+    """
+    name_lower = name.lower()
+    if name_lower in _AUXILIARY_DIR_NAMES:
+        return _AUXILIARY_CATEGORY.get(name_lower, "辅助代码")
+    # Word-level match: "js_tests", "e2e-tests", "playwright-spec", etc.
+    for token in re.split(r"[_\-]", name_lower):
+        if token in _AUXILIARY_DIR_NAMES:
+            return _AUXILIARY_CATEGORY.get(token, "辅助代码")
+    return None
+
+
+def _classify_top_dirs(
+    all_file_paths: list[str],
+) -> tuple[tuple[str, ...], list[dict[str, object]]]:
+    """Classify top-level directories from *all_file_paths* into L1 and L2.
+
+    Returns:
+        l1_roots: directories to include in deep module analysis.
+        aux_dirs: list of ``{"name", "file_count", "category"}`` dicts (L2).
+
+    L3 (noise) is silently dropped:
+        - directories starting with ``.``
+        - names that look like filenames (contain a file extension, e.g.
+          ``vitest.config.mts``)
+    """
+    import collections
+
+    counts: dict[str, int] = collections.Counter()
+    for fp in all_file_paths:
+        top = fp.split("/")[0] if "/" in fp else ""
+        if top:
+            counts[top] += 1
+
+    l1: list[str] = []
+    aux: list[dict[str, object]] = []
+
+    for name, cnt in sorted(counts.items(), key=lambda x: -x[1]):
+        # L3: starts with '.' or looks like a filename
+        if name.startswith(".") or _HAS_EXTENSION_RE.search(name):
+            continue
+        name_lower = name.lower()
+        category = _is_auxiliary_dir(name)
+        if category is not None:
+            aux.append({"name": name, "file_count": cnt, "category": category})
+        else:
+            l1.append(name)
+
+    return tuple(l1), aux
+
+
+def _resolve_roots_and_aux(
+    all_file_paths: list[str],
+) -> tuple[tuple[str, ...], list[dict[str, object]]]:
+    """Return (include_roots, auxiliary_dirs) for the current run.
+
+    Priority:
+    1. User-configured ``CODESENSE_INCLUDE_DIRS`` → use as L1 roots;
+       still detect L2 from DB paths under non-configured dirs.
+    2. DB has files under ``src/`` → use ``("src",)`` (legacy default).
+    3. Auto-detect from DB.
+    """
+    user_roots = _get_include_roots()
+
+    if user_roots:
+        # User explicitly configured roots: use them as L1, discover L2 from the rest.
+        other_paths = [
+            p for p in all_file_paths
+            if not any(p.startswith(r + "/") or p == r for r in user_roots)
+        ]
+        _, aux = _classify_top_dirs(other_paths)
+        return user_roots, aux
+
+    # Check if default "src/" has any files
+    has_src = any(p.startswith("src/") for p in all_file_paths)
+    if has_src:
+        _, aux = _classify_top_dirs(
+            [p for p in all_file_paths if not p.startswith("src/")]
+        )
+        return _DEFAULT_INCLUDE_ROOTS, aux
+
+    # Auto-detect
+    return _classify_top_dirs(all_file_paths)
 
 
 def _is_under_roots(d: str, roots: tuple[str, ...]) -> bool:
@@ -122,8 +236,8 @@ async def project_map_summary(project_root: Path) -> str:
     """Return project-level architecture summary as Markdown.
 
     Lazy cache: if DB hash unchanged → return cached project_map.md.
-    Otherwise: invalidate, call LLM for JSON module mapping, render Markdown,
-    write cache, return.
+    Otherwise: auto-classify directories, call LLM for L1 module mapping,
+    render Markdown (with L2 auxiliary section), write cache, return.
 
     Raises:
         FileNotFoundError: if the CodeGraph DB does not exist.
@@ -155,7 +269,8 @@ async def project_map_summary(project_root: Path) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
-    roots = _get_include_roots()
+    roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
+
     all_file_paths = [
         p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
     ]
@@ -172,9 +287,9 @@ async def project_map_summary(project_root: Path) -> str:
 
     expanded = _expand_module_files(modules_json, all_file_paths)
 
-    cache.write_modules_index(codesense_dir, expanded, current_hash)
+    cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
 
-    markdown = _render_project_map_markdown(expanded, dir_deps)
+    markdown = _render_project_map_markdown(expanded, dir_deps, aux_dirs=aux_dirs)
     cache.write_project_map(codesense_dir, markdown, current_hash)
     return markdown
 
@@ -231,7 +346,26 @@ async def module_summary(project_root: Path, module_name: str) -> str:
         else []
     )
 
+    # Check L2 auxiliary dirs first
+    raw_aux = index.get("auxiliary_dirs")
+    aux_list: list[dict[str, object]] = (
+        [a for a in raw_aux if isinstance(a, dict)]
+        if isinstance(raw_aux, list)
+        else []
+    )
     norm_name = module_name.strip().lower()
+    for aux in aux_list:
+        if str(aux.get("name", "")).strip().lower() == norm_name:
+            category = str(aux.get("category", "辅助代码"))
+            file_count = aux.get("file_count", "?")
+            name = str(aux.get("name", module_name))
+            return (
+                f"# {name}\n\n"
+                f"此目录属于 **{category}**，包含约 {file_count} 个文件，"
+                "未做深入的模块结构分析。\n\n"
+                "如需了解其中的具体代码，请直接使用 `read_file` 或 codegraph 工具查询。"
+            )
+
     entry: dict[str, object] | None = None
     for m in modules_list:
         if str(m.get("name", "")).strip().lower() == norm_name:
@@ -239,7 +373,11 @@ async def module_summary(project_root: Path, module_name: str) -> str:
             break
 
     if entry is None:
-        available = [str(m.get("name", "")) for m in modules_list]
+        available_l1 = [str(m.get("name", "")) for m in modules_list]
+        available_l2 = [str(a.get("name", "")) for a in aux_list]
+        available = available_l1 + (
+            [f"{n}（辅助目录）" for n in available_l2] if available_l2 else []
+        )
         raise InvalidArgumentError(
             f"参数错误：模块 '{module_name}' 不存在。"
             f"可用模块：{', '.join(available)}。"
@@ -491,6 +629,7 @@ def _expand_module_files(
 def _render_project_map_markdown(
     modules: list[dict[str, object]],
     dir_deps: dict[str, dict[str, list[str]]],
+    aux_dirs: list[dict[str, object]] | None = None,
 ) -> str:
     """Render project_map.md from structured module data (no LLM call)."""
     lines: list[str] = [
@@ -553,6 +692,22 @@ def _render_project_map_markdown(
             lines.append(f"| {src_mod} | {tgt_mod} | {kind} |")
     else:
         lines.append("（无跨模块依赖）")
+
+    if aux_dirs:
+        lines.extend(
+            [
+                "",
+                "## 其他目录",
+                "",
+                "| 目录 | 类型 | 文件数 |",
+                "|------|------|--------|",
+            ]
+        )
+        for aux in aux_dirs:
+            name = str(aux.get("name", ""))
+            category = str(aux.get("category", "辅助代码"))
+            file_count = aux.get("file_count", "?")
+            lines.append(f"| `{name}` | {category} | {file_count} |")
 
     return "\n".join(lines)
 
