@@ -128,7 +128,7 @@ async def test_dispatch_missing_required_field() -> None:
 
     result = await dispatch("t", {"a": 1})
     assert result.isError is True
-    assert first_text(result) == "参数错误：缺失必填参数 'b'"
+    assert first_text(result) == "参数错误：缺失必填参数 'b'。请检查工具参数说明，补充必要参数后重新调用。"
 
 
 async def test_dispatch_wrong_type() -> None:
@@ -152,7 +152,7 @@ async def test_dispatch_extra_property() -> None:
 
     result = await dispatch("t", {"a": 1, "b": 2, "c": 3})
     assert result.isError is True
-    assert first_text(result) == "参数错误：不允许的多余参数 'c'"
+    assert first_text(result) == "参数错误：不允许的多余参数 'c'，请移除该参数后重新调用。"
 
 
 # ---------------------------------------------------------------------------

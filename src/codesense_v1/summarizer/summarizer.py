@@ -242,7 +242,8 @@ async def module_summary(project_root: Path, module_name: str) -> str:
         available = [str(m.get("name", "")) for m in modules_list]
         raise InvalidArgumentError(
             f"参数错误：模块 '{module_name}' 不存在。"
-            f"可用模块：{', '.join(available)}"
+            f"可用模块：{', '.join(available)}。"
+            f"请使用上述模块名之一重新调用 explore_module。"
         )
 
     with CodeGraphDB(project_root) as db:

@@ -73,13 +73,16 @@ def _translate_jsonschema_error(error: jsonschema.ValidationError) -> str:
     if validator == "required":
         # error.message 形如 "'b' is a required property"
         field = error.message.split("'")[1]
-        return f"参数错误：缺失必填参数 '{field}'"
+        return (
+            f"参数错误：缺失必填参数 '{field}'。"
+            f"请检查工具参数说明，补充必要参数后重新调用。"
+        )
     if validator == "type":
         path = list(error.absolute_path)
         field = str(path[-1]) if path else "unknown"
         expected = str(error.validator_value)
         actual = type(error.instance).__name__
-        return f"参数错误：'{field}' 期望 {expected}，收到 {actual}"
+        return f"参数错误：'{field}' 期望 {expected}，收到 {actual}，请修正参数类型后重新调用。"
     if validator == "additionalProperties":
         # error.message 形如 "Additional properties are not allowed ('c' was unexpected)"
         msg = error.message
@@ -93,8 +96,8 @@ def _translate_jsonschema_error(error: jsonschema.ValidationError) -> str:
             properties: dict[str, Any] = schema.get("properties", {})
             extra = set(instance.keys()) - set(properties.keys())
             field = next(iter(extra), "unknown")
-        return f"参数错误：不允许的多余参数 '{field}'"
-    return f"参数错误：{error.message}"
+        return f"参数错误：不允许的多余参数 '{field}'，请移除该参数后重新调用。"
+    return f"参数错误：{error.message}，请修正后重新调用。"
 
 
 async def dispatch(name: str, arguments: dict[str, object]) -> CallToolResult:
