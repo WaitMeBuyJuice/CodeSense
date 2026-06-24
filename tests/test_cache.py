@@ -157,10 +157,8 @@ def test_write_module_updates_meta(tmp_path: Path) -> None:
 def test_write_module_json_structure(tmp_path: Path) -> None:
     cs = _cs_dir(tmp_path)
     cache.write_module(cs, "src_auth", "Auth 模块", "my summary", "h1")
-    data = json.loads((cs / "modules" / "src_auth.json").read_text(encoding="utf-8"))
-    assert data["module_name"] == "Auth 模块"
-    assert data["summary"] == "my summary"
-    assert "generated_at" in data
+    content = (cs / "modules" / "src_auth.md").read_text(encoding="utf-8")
+    assert content == "my summary"
 
 
 # ---- invalidate -------------------------------------------------------------
@@ -213,19 +211,17 @@ def test_module_key_nested(tmp_path: Path) -> None:
 # ---- safe_key ---------------------------------------------------------------
 
 
-def test_safe_key_returns_12_hex_chars(tmp_path: Path) -> None:
-    key = cache.safe_key("缓存层")
-    assert len(key) == 12
-    assert all(c in "0123456789abcdef" for c in key)
+def test_safe_key_returns_module_name(tmp_path: Path) -> None:
+    assert cache.safe_key("缓存层") == "缓存层"
 
 
 def test_safe_key_trim_invariant(tmp_path: Path) -> None:
     assert cache.safe_key("缓存层") == cache.safe_key(" 缓存层 ")
 
 
-def test_safe_key_case_invariant(tmp_path: Path) -> None:
-    assert cache.safe_key("Cache") == cache.safe_key("cache")
-    assert cache.safe_key("Cache") == cache.safe_key("CACHE")
+def test_safe_key_case_preserved(tmp_path: Path) -> None:
+    assert cache.safe_key("Cache") == "Cache"
+    assert cache.safe_key("CACHE") == "CACHE"
 
 
 def test_safe_key_different_names_differ(tmp_path: Path) -> None:
@@ -234,5 +230,11 @@ def test_safe_key_different_names_differ(tmp_path: Path) -> None:
 
 def test_safe_key_special_chars(tmp_path: Path) -> None:
     key = cache.safe_key("模块 A/B (核心)")
-    assert len(key) == 12
-    assert all(c in "0123456789abcdef" for c in key)
+    assert key == "模块 A_B (核心)"
+    assert "/" not in key
+    assert "\\" not in key
+
+
+def test_safe_key_truncates_long_name(tmp_path: Path) -> None:
+    long_name = "a" * 200
+    assert len(cache.safe_key(long_name)) == 100

@@ -33,5 +33,5 @@ async def list_cached_modules() -> str:
     if not modules_dir.is_dir():
         return json.dumps([], ensure_ascii=False)
 
-    keys = [f.stem for f in sorted(modules_dir.glob("*.json"))]
+    keys = [f.stem for f in sorted(modules_dir.glob("*.md"))]
     return json.dumps(keys, ensure_ascii=False)

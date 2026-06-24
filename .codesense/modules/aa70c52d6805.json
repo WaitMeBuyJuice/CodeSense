@@ -1,5 +1,0 @@
-{
-  "module_name": "工具实现",
-  "summary": "# 模块理解文档：工具实现\n\n## 1. 一句话描述\n定义并执行代码分析相关的MCP工具。\n\n## 2. 对外接口\n- **`add`** (function): `(a: float, b: float) -> str`\n- **`explore_module`** (function): `(module_name: str) -> str`\n- **`list_cached`** (function): `() -> str`\n- **`list_cached_modules`** (function): `() -> str`\n- **`project_map_tool`** (function): `() -> str`\n\n## 3. 内部文件\n- `src/codesense_v1/tools/__init__.py`：模块初始化文件，将各个工具组织为一个 Python 包。\n- `src/codesense_v1/tools/add.py`：实现基本的加法计算工具。\n- `src/codesense_v1/tools/explore_module.py`：实现探索和获取指定模块信息的工具。\n- `src/codesense_v1/tools/list_cached.py`：实现列出当前缓存内容的工具。\n- `src/codesense_v1/tools/list_cached_modules.py`：实现列出所有已缓存模块列表的工具。\n- `src/codesense_v1/tools/project_map_tool.py`：实现生成或获取项目结构映射的工具。\n\n## 4. 依赖关系\n- **上游依赖**：\n  - `src/codesense_v1`\n  - `src/codesense_v1/registry`\n  - `src/codesense_v1/summarizer`\n- **下游依赖**：\n  - `tests`",
-  "generated_at": "2026-06-22T07:57:25.926601+00:00"
-}

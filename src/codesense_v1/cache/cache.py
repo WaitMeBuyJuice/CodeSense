@@ -10,6 +10,7 @@ project_map, modules_index, meta, and all module files.
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -103,13 +104,11 @@ def write_modules_index(
 
 
 def read_module(codesense_dir: Path, module_key_str: str) -> str | None:
-    """Return the ``summary`` field from ``modules/<module_key>.json``, or ``None``."""
+    """Return module summary from ``modules/<module_key>.md``, or ``None`` if missing."""
     try:
-        data = json.loads(
-            (codesense_dir / _MODULES_DIR / f"{module_key_str}.json").read_text(encoding="utf-8")
+        return (codesense_dir / _MODULES_DIR / f"{module_key_str}.md").read_text(
+            encoding="utf-8"
         )
-        val = data.get("summary")
-        return str(val) if val is not None else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -117,24 +116,17 @@ def read_module(codesense_dir: Path, module_key_str: str) -> str | None:
 def write_module(
     codesense_dir: Path,
     module_key_str: str,
-    module_name: str,
+    module_name: str,  # noqa: ARG001 — kept for API compatibility
     summary: str,
     current_hash: str,
 ) -> None:
-    """Write ``modules/<module_key>.json`` and update ``meta.json`` with *current_hash*.
+    """Write ``modules/<module_key>.md`` and update ``meta.json`` with *current_hash*.
 
     Creates ``codesense_dir/modules/`` if needed.
     """
     modules_dir = codesense_dir / _MODULES_DIR
     modules_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "module_name": module_name,
-        "summary": summary,
-        "generated_at": _now_iso(),
-    }
-    (modules_dir / f"{module_key_str}.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    (modules_dir / f"{module_key_str}.md").write_text(summary, encoding="utf-8")
     _write_meta(codesense_dir, current_hash)
 
 
@@ -170,23 +162,27 @@ def module_key(module_path: str) -> str:
     return module_path.strip().replace("/", "_").replace("\\", "_")
 
 
-def safe_key(module_name: str) -> str:
-    """Generate a stable filename key from a human-readable module name.
+_ILLEGAL_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
-    Uses SHA-1 (first 12 hex chars) of the normalised (trimmed + lowercased)
-    name so the key survives Unicode, spaces and special characters safely
-    on all file systems.  The human-readable name is stored in the JSON
-    payload under the ``module_name`` field.
+
+def safe_key(module_name: str) -> str:
+    """Generate a human-readable filename key from a module name.
+
+    Replaces characters illegal on Windows/Linux filesystems (``/ \\ : * ? " < > |``
+    and ASCII control chars) with ``_``, strips surrounding ``_``, and truncates to
+    100 characters.  The original name is stored in the JSON payload under
+    ``module_name``.
 
     Example::
 
         >>> safe_key("缓存层") == safe_key(" 缓存层 ")  # trim-invariant
         True
-        >>> safe_key("Cache") == safe_key("cache")  # case-invariant
-        True
+        >>> safe_key("模块 A/B (核心)")
+        '模块 A_B (核心)'
     """
-    norm = module_name.strip().lower()
-    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]
+    sanitised = _ILLEGAL_CHARS.sub("_", module_name.strip())
+    sanitised = sanitised.strip("_")
+    return sanitised[:100] if sanitised else "_"
 
 
 # ---------- private helpers -------------------------------------------------
