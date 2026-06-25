@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-25T03:25:26.310734+00:00",
+  "generated_at": "2026-06-25T04:45:48.770457+00:00",
   "modules": [
     {
-      "name": "错误定义",
-      "description": "定义工具异常层次结构(ToolError/ValidationError/LLMError等)",
+      "name": "核心基础",
+      "description": "提供版本号与工具领域异常基类",
       "directories": [
         "src/codesense_v1"
       ],
@@ -14,7 +14,7 @@
     },
     {
       "name": "缓存层",
-      "description": "管理 .codesense 缓存文件的读写、校验与失效",
+      "description": "管理 .codesense 缓存文件的读写与失效校验",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -25,13 +25,14 @@
     },
     {
       "name": "数据层",
-      "description": "封装 CodeGraph DB 查询、文件遍历与模块依赖聚合",
+      "description": "封装 CodeGraph SQLite 只读查询与模块目录依赖聚合及架构特征计算",
       "directories": [
         "src/codesense_v1/data"
       ],
       "files": [
         "src/codesense_v1/data/__init__.py",
         "src/codesense_v1/data/aggregate.py",
+        "src/codesense_v1/data/architecture.py",
         "src/codesense_v1/data/db.py",
         "src/codesense_v1/data/files.py",
         "src/codesense_v1/data/modules.py"
@@ -39,7 +40,7 @@
     },
     {
       "name": "工具注册",
-      "description": "提供装饰器式工具注册与 JSON Schema 参数校验分发",
+      "description": "提供 MCP 工具注册装饰器与 JSON Schema 校验分发",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -49,8 +50,8 @@
       ]
     },
     {
-      "name": "MCP 服务",
-      "description": "构建 MCP Server 并暴露 stdio 传输入口",
+      "name": "服务器入口",
+      "description": "构建 MCP stdio 服务器并加载工具注册",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -62,7 +63,7 @@
     },
     {
       "name": "摘要生成",
-      "description": "生成项目架构概览与模块摘要的提示词及渲染逻辑",
+      "description": "协调数据层与缓存生成架构 Markdown 摘要及分析提示词",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -72,8 +73,8 @@
       ]
     },
     {
-      "name": "MCP 工具",
-      "description": "定义对外暴露的 MCP 工具(project_map/explore_module等)",
+      "name": "工具实现",
+      "description": "实现六个 MCP 工具并注册到 registry",
       "directories": [
         "src/codesense_v1/tools"
       ],
@@ -91,7 +92,7 @@
   "auxiliary_dirs": [
     {
       "name": "tests",
-      "file_count": 10,
+      "file_count": 11,
       "category": "测试代码"
     },
     {

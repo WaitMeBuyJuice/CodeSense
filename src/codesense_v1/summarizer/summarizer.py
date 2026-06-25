@@ -10,6 +10,14 @@ from pathlib import Path
 
 from codesense_v1 import cache
 from codesense_v1.data.aggregate import directory_dependencies, directory_symbols
+from codesense_v1.data.architecture import (
+    DirCentrality,
+    compute_centrality,
+    cross_dir_public_api,
+    external_dependencies_by_dir,
+    find_cycles,
+    topological_layers,
+)
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.modules import list_modules, module_dependencies
 from codesense_v1.errors import InvalidArgumentError
@@ -267,9 +275,10 @@ async def get_project_map_prompt(project_root: Path) -> str:
     """
     with CodeGraphDB(project_root) as db:
         modules_data = list_modules(db)
-        edges = module_dependencies(db, include_external=False)
+        edges_all = module_dependencies(db, include_external=True)
+        edges_internal = [e for e in edges_all if not e.is_external]
         dir_deps = directory_dependencies(
-            edges, modules_data, include_external=False, include_self_loops=False
+            edges_internal, modules_data, include_external=False, include_self_loops=False
         )
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
@@ -277,7 +286,21 @@ async def get_project_map_prompt(project_root: Path) -> str:
     roots, _ = _resolve_roots_and_aux(all_file_paths)
     dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
     dir_deps = _filter_dir_deps(dir_deps, roots)
-    return _build_project_map_prompt(dir_deps, dir_syms, roots=roots)
+
+    centrality = compute_centrality(edges_all, modules_data)
+    layers = topological_layers(edges_internal, modules_data)
+    cycles = find_cycles(edges_internal, modules_data)
+    ext_by_dir = external_dependencies_by_dir(edges_all, modules_data)
+
+    return _build_project_map_prompt(
+        dir_deps,
+        dir_syms,
+        roots=roots,
+        centrality=centrality,
+        layers=layers,
+        cycles=cycles,
+        ext_by_dir=ext_by_dir,
+    )
 
 
 async def submit_project_map(project_root: Path, response: str) -> str:
@@ -372,9 +395,10 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
 
     with CodeGraphDB(project_root) as db:
         modules_data = list_modules(db)
-        edges = module_dependencies(db, include_external=False)
+        edges_all = module_dependencies(db, include_external=True)
+        edges_internal = [e for e in edges_all if not e.is_external]
         dir_deps = directory_dependencies(
-            edges, modules_data, include_external=False, include_self_loops=False
+            edges_internal, modules_data, include_external=False, include_self_loops=False
         )
         files_raw = entry.get("files")
         module_file_set = {str(f) for f in (files_raw if isinstance(files_raw, list) else [])}
@@ -387,8 +411,33 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
             file_symbols.setdefault(fp, []).append(
                 f"- `{node.name}` ({node.kind}): {sig}"
             )
+        public_api_all = cross_dir_public_api(db)
+        ext_by_dir_all = external_dependencies_by_dir(edges_all, modules_data)
 
-    return _build_module_prompt(entry, dir_deps, file_symbols)
+    dirs_raw = entry.get("directories")
+    directories: list[str] = [str(d) for d in (dirs_raw if isinstance(dirs_raw, list) else [])]
+    dirs_set = set(directories)
+
+    # Flatten public symbols for this module's directories
+    pub_syms: list[str] = []
+    for d in directories:
+        for sym in public_api_all.get(d, []):
+            if sym not in pub_syms:
+                pub_syms.append(sym)
+    pub_syms.sort()
+
+    # Aggregate external deps for this module's directories
+    ext_deps: set[str] = set()
+    for d in directories:
+        ext_deps.update(ext_by_dir_all.get(d, []))
+
+    return _build_module_prompt(
+        entry,
+        dir_deps,
+        file_symbols,
+        public_symbols=pub_syms,
+        external_deps=sorted(ext_deps),
+    )
 
 
 def save_module_summary(project_root: Path, module_name: str, summary: str) -> None:
@@ -665,21 +714,85 @@ def _build_project_map_prompt(
     dir_deps: dict[str, dict[str, list[str]]],
     dir_syms: dict[str, list[dict[str, str]]],
     roots: tuple[str, ...] = _DEFAULT_INCLUDE_ROOTS,
+    *,
+    centrality: dict[str, DirCentrality] | None = None,
+    layers: list[list[str]] | None = None,
+    cycles: list[list[str]] | None = None,
+    ext_by_dir: dict[str, list[str]] | None = None,
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
+    all_dirs_set = set(all_dirs)
     n_dirs = len(all_dirs)
     roots_str = "、".join(f"`{r}`" for r in roots)
 
+    # ---- directory section: symbol count + centrality + external deps -------
     dir_lines: list[str] = []
     for d in all_dirs:
         syms = dir_syms.get(d, [])
         sym_names = ", ".join(s["name"] for s in syms)
-        if sym_names:
-            dir_lines.append(f"- `{d}`: {len(syms)} 个符号  [{sym_names}]")
-        else:
-            dir_lines.append(f"- `{d}`: {len(syms)} 个符号")
+
+        # (←fan_in →fan_out) centrality annotation
+        cent_str = ""
+        if centrality and d in centrality:
+            c = centrality[d]
+            cent_str = f"  (←{c.fan_in} →{c.fan_out})"
+
+        # external deps annotation (up to 5 to stay compact)
+        ext_str = ""
+        if ext_by_dir and d in ext_by_dir:
+            deps = ext_by_dir[d]
+            if deps:
+                ext_str = "  外部: " + ", ".join(deps[:5])
+                if len(deps) > 5:
+                    ext_str += f" …+{len(deps) - 5}"
+
+        sym_part = f"  [{sym_names}]" if sym_names else ""
+        dir_lines.append(f"- `{d}`: {len(syms)} 个符号{cent_str}{ext_str}{sym_part}")
     dir_section = "\n".join(dir_lines) if dir_lines else "（无目录数据）"
 
+    # ---- architecture layers section ----------------------------------------
+    layer_section_str = ""
+    if layers:
+        filtered_layers = [
+            sorted(d for d in layer if d in all_dirs_set)
+            for layer in layers
+        ]
+        filtered_layers = [layer for layer in filtered_layers if layer]
+        if filtered_layers:
+            layer_lines: list[str] = []
+            last_idx = len(filtered_layers) - 1
+            for i, layer in enumerate(filtered_layers):
+                dirs_str = ", ".join(f"`{d}`" for d in layer)
+                if i == 0:
+                    label = "第 0 层（基础层，被其他层依赖，无内部出边）"
+                elif i == last_idx:
+                    label = f"第 {i} 层（入口层，不被其他层依赖）"
+                else:
+                    label = f"第 {i} 层"
+                layer_lines.append(f"- {label}：{dirs_str}")
+            layer_section_str = (
+                "\n\n### 架构层级（拓扑排序，可辅助理解各目录在调用栈中的位置）\n"
+                + "\n".join(layer_lines)
+            )
+
+    # ---- cycle warning -------------------------------------------------------
+    cycle_warning_str = ""
+    if cycles:
+        root_cycles = [
+            comp for comp in cycles
+            if any(d in all_dirs_set for d in comp)
+        ]
+        if root_cycles:
+            cycle_lines = [
+                "  " + " ↔ ".join(f"`{d}`" for d in comp)
+                for comp in root_cycles
+            ]
+            cycle_warning_str = (
+                "\n- ⚠️ **循环依赖警告**：以下目录组存在相互依赖，划分时可合并为同一模块，"
+                "或在描述中注明耦合关系：\n" + "\n".join(cycle_lines)
+            )
+
+    # ---- dependency section --------------------------------------------------
     dep_lines: list[str] = []
     for src, buckets in sorted(dir_deps.items()):
         all_targets: set[str] = set()
@@ -700,10 +813,14 @@ def _build_project_map_prompt(
         f"- 项目共 {n_dirs} 个目录，**默认假设：每个目录代表一个独立模块**，"
         f"预期产出约 {n_dirs} 个模块。\n"
         "- 仅当两个目录承担**完全相同**的职责且强耦合时，才可合并为同一模块；"
-        "语义不同的目录（如 errors、llm、cache）必须独立成模块。\n\n"
+        "语义不同的目录（如 errors、llm、cache）必须独立成模块。\n"
+        "- 目录条目中 `(←N →M)` 表示：该目录被 N 个其他目录依赖（fan-in），"
+        "自身依赖 M 个其他目录（fan-out）。fan-in 高 → 基础设施；fan-out 高且 fan-in 低 → 入口/编排层。"
+        f"{cycle_warning_str}\n\n"
         "## 输入数据\n\n"
         "### 目录结构（含代表性符号，最多 50 个/目录）\n"
-        f"{dir_section}\n\n"
+        f"{dir_section}"
+        f"{layer_section_str}\n\n"
         "### 目录间依赖（仅内部依赖）\n"
         f"{dep_section}\n\n"
         "## 输出格式\n\n"
@@ -727,6 +844,9 @@ def _build_module_prompt(
     entry: dict[str, object],
     dir_deps: dict[str, dict[str, list[str]]],
     file_symbols: dict[str, list[str]],
+    *,
+    public_symbols: list[str] | None = None,
+    external_deps: list[str] | None = None,
 ) -> str:
     name = str(entry.get("name", ""))
     description = str(entry.get("description", ""))
@@ -767,22 +887,40 @@ def _build_module_prompt(
     outbound_txt = "\n".join(f"- `{d}`" for d in sorted(outbound)) or "（无）"
     inbound_txt = "\n".join(f"- `{d}`" for d in sorted(inbound)) or "（无）"
 
+    # Graph-derived public API (cross-directory imports, language-agnostic)
+    pub_api_txt = (
+        "\n".join(f"- `{s}`" for s in public_symbols)
+        if public_symbols
+        else "（暂无外部调用记录——该模块可能为纯内部实现）"
+    )
+
+    # External library dependencies
+    ext_deps_txt = (
+        "\n".join(f"- `{d}`" for d in external_deps)
+        if external_deps
+        else "（无）"
+    )
+
     return (
         "# 模块详细分析请求\n\n"
         "你是一位软件架构师，请根据以下模块结构数据，生成一份**模块理解文档**。\n\n"
         "## 要求\n\n"
         "输出为 Markdown 格式，包含：\n"
         "1. **概述**：该模块的核心职责（不超过 50 字）\n"
-        "2. **对外接口**：列出该模块对外暴露的函数/类（参考语言惯例：Python 看名称是否以 _ 开头；"
-        "TypeScript/JS 看是否 export；其他语言依据签名特征推断）\n"
-        "   注意：请**仅列出下方「模块内符号」中实际存在的符号**，不要编造不存在的接口\n"
+        "2. **对外接口**：直接使用下方「对外接口（图推导）」列出的符号，"
+        "逐一说明其用途；若该列表为空，可从「模块内符号」中依据语言惯例补充推断\n"
         "3. **内部文件**：该模块包含的文件列表，每个文件一句话说明作用\n"
-        "4. **依赖关系**：上游（该模块依赖的目录）/ 下游（依赖该模块的目录）\n\n"
+        "4. **依赖关系**：上游（该模块依赖的目录）/ 下游（依赖该模块的目录）\n"
+        "5. **外部依赖**：该模块引入的第三方或标准库（来自下方「外部依赖库」）\n\n"
         "## 模块数据\n\n"
         f"### 模块名称\n{name}\n\n"
         f"### project_map 中的初步描述\n{description}\n\n"
         f"### 包含文件\n{files_txt}\n\n"
-        f"### 模块内符号（函数/类/方法）\n{symbols_txt}\n\n"
+        f"### 对外接口（图推导：被其他目录实际 import 的符号，无语言偏见）\n"
+        f"{pub_api_txt}\n\n"
+        f"### 外部依赖库（该模块直接引入的第三方/标准库）\n"
+        f"{ext_deps_txt}\n\n"
+        f"### 模块内符号（函数/类/方法，含签名）\n{symbols_txt}\n\n"
         f"### 上游依赖（该模块依赖的目录）\n{outbound_txt}\n\n"
         f"### 下游依赖（依赖该模块的目录）\n{inbound_txt}\n"
     )
