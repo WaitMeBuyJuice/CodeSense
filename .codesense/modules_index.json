@@ -1,44 +1,20 @@
 {
-  "generated_at": "2026-06-22T07:56:47.876937+00:00",
+  "generated_at": "2026-06-25T03:25:26.310734+00:00",
   "modules": [
     {
       "name": "错误定义",
-      "description": "定义工具与LLM相关错误类型",
+      "description": "定义工具异常层次结构(ToolError/ValidationError/LLMError等)",
       "directories": [
         "src/codesense_v1"
       ],
       "files": [
         "src/codesense_v1/__init__.py",
-        "src/codesense_v1/cache/__init__.py",
-        "src/codesense_v1/cache/cache.py",
-        "src/codesense_v1/data/__init__.py",
-        "src/codesense_v1/data/aggregate.py",
-        "src/codesense_v1/data/db.py",
-        "src/codesense_v1/data/files.py",
-        "src/codesense_v1/data/modules.py",
-        "src/codesense_v1/errors.py",
-        "src/codesense_v1/llm/__init__.py",
-        "src/codesense_v1/llm/llm.py",
-        "src/codesense_v1/registry/__init__.py",
-        "src/codesense_v1/registry/registry.py",
-        "src/codesense_v1/resources/__init__.py",
-        "src/codesense_v1/resources/project_map.py",
-        "src/codesense_v1/server/__init__.py",
-        "src/codesense_v1/server/__main__.py",
-        "src/codesense_v1/server/server.py",
-        "src/codesense_v1/summarizer/__init__.py",
-        "src/codesense_v1/summarizer/summarizer.py",
-        "src/codesense_v1/tools/__init__.py",
-        "src/codesense_v1/tools/add.py",
-        "src/codesense_v1/tools/explore_module.py",
-        "src/codesense_v1/tools/list_cached.py",
-        "src/codesense_v1/tools/list_cached_modules.py",
-        "src/codesense_v1/tools/project_map_tool.py"
+        "src/codesense_v1/errors.py"
       ]
     },
     {
-      "name": "缓存管理",
-      "description": "提供查询结果与中间数据的缓存能力",
+      "name": "缓存层",
+      "description": "管理 .codesense 缓存文件的读写、校验与失效",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -48,8 +24,8 @@
       ]
     },
     {
-      "name": "数据管理",
-      "description": "加载、组织并提供代码库相关数据访问",
+      "name": "数据层",
+      "description": "封装 CodeGraph DB 查询、文件遍历与模块依赖聚合",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -62,19 +38,8 @@
       ]
     },
     {
-      "name": "LLM交互",
-      "description": "封装大语言模型调用、提示构造与响应处理",
-      "directories": [
-        "src/codesense_v1/llm"
-      ],
-      "files": [
-        "src/codesense_v1/llm/__init__.py",
-        "src/codesense_v1/llm/llm.py"
-      ]
-    },
-    {
-      "name": "注册中心",
-      "description": "统一注册和发现工具、资源等服务能力",
+      "name": "工具注册",
+      "description": "提供装饰器式工具注册与 JSON Schema 参数校验分发",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -84,19 +49,8 @@
       ]
     },
     {
-      "name": "MCP资源",
-      "description": "定义并对外暴露可读的MCP资源",
-      "directories": [
-        "src/codesense_v1/resources"
-      ],
-      "files": [
-        "src/codesense_v1/resources/__init__.py",
-        "src/codesense_v1/resources/project_map.py"
-      ]
-    },
-    {
-      "name": "MCP服务端",
-      "description": "启动MCP服务并协调请求、工具与资源调度",
+      "name": "MCP 服务",
+      "description": "构建 MCP Server 并暴露 stdio 传输入口",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -108,7 +62,7 @@
     },
     {
       "name": "摘要生成",
-      "description": "对代码库或代码实体生成结构化摘要",
+      "description": "生成项目架构概览与模块摘要的提示词及渲染逻辑",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -118,19 +72,32 @@
       ]
     },
     {
-      "name": "工具实现",
-      "description": "定义并执行代码分析相关的MCP工具",
+      "name": "MCP 工具",
+      "description": "定义对外暴露的 MCP 工具(project_map/explore_module等)",
       "directories": [
         "src/codesense_v1/tools"
       ],
       "files": [
         "src/codesense_v1/tools/__init__.py",
-        "src/codesense_v1/tools/add.py",
         "src/codesense_v1/tools/explore_module.py",
-        "src/codesense_v1/tools/list_cached.py",
-        "src/codesense_v1/tools/list_cached_modules.py",
-        "src/codesense_v1/tools/project_map_tool.py"
+        "src/codesense_v1/tools/get_module_prompt.py",
+        "src/codesense_v1/tools/get_project_map_prompt.py",
+        "src/codesense_v1/tools/project_map.py",
+        "src/codesense_v1/tools/save_module_summary.py",
+        "src/codesense_v1/tools/submit_project_map.py"
       ]
+    }
+  ],
+  "auxiliary_dirs": [
+    {
+      "name": "tests",
+      "file_count": 10,
+      "category": "测试代码"
+    },
+    {
+      "name": "scripts",
+      "file_count": 1,
+      "category": "辅助脚本"
     }
   ]
 }

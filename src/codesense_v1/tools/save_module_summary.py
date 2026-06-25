@@ -1,0 +1,58 @@
+"""MCP Tool: save_module_summary — write Agent-generated module summary to cache."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Final
+
+from codesense_v1 import summarizer
+from codesense_v1.errors import InvalidArgumentError
+from codesense_v1.registry import tool
+
+_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "properties": {
+        "module_name": {
+            "type": "string",
+            "description": "project_map 中列出的模块名（精确名称）",
+        },
+        "summary": {
+            "type": "string",
+            "description": "模块摘要 Markdown 文本",
+        },
+    },
+    "required": ["module_name", "summary"],
+    "additionalProperties": False,
+}
+
+
+@tool(
+    name="save_module_summary",
+    description=(
+        "将模块摘要写入缓存，后续 explore_module 调用将直接返回该内容。\n\n"
+        "仅在 explore_module 返回生成步骤引导时使用，通常委派给子 Agent 执行。\n"
+        "正常使用时无需主动调用本工具。\n\n"
+        "module_name 必须是 project_map 返回的模块名之一。\n"
+        "保存成功后，主 Agent 重新调用 explore_module 即可获取模块摘要。"
+    ),
+    input_schema=_SCHEMA,
+)
+async def save_module_summary_tool(module_name: str, summary: str) -> str:
+    module_name = module_name.strip()
+    if not module_name:
+        raise InvalidArgumentError("参数错误：module_name 不能为空")
+    if not summary.strip():
+        raise InvalidArgumentError("参数错误：summary 不能为空")
+    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
+    if not project_root_str:
+        raise InvalidArgumentError("参数错误：环境变量 CODESENSE_PROJECT_ROOT 未设置")
+    try:
+        summarizer.save_module_summary(Path(project_root_str), module_name, summary)
+        return f"已保存模块 '{module_name}' 的摘要（{len(summary)} 字符）。"
+    except FileNotFoundError:
+        return (
+            "# 错误\n\n"
+            f"CodeGraph 数据库不存在（项目路径：{project_root_str}）。\n\n"
+            "请先在该目录下运行 `codegraph init -i`。"
+        )

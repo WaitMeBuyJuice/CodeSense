@@ -45,75 +45,65 @@ async def test_list_tools() -> None:
         async with ClientSession(read, write) as s:
             await s.initialize()
             response = await s.list_tools()
-            tools = response.tools
-            tool_names = {t.name for t in tools}
-            assert "add" in tool_names
+            tool_names = {t.name for t in response.tools}
+            assert "project_map" in tool_names
             assert "explore_module" in tool_names
-            add_tool = next(t for t in tools if t.name == "add")
-            schema = add_tool.inputSchema
-            assert "a" in schema.get("required", [])
-            assert "b" in schema.get("required", [])
-            assert schema["properties"]["a"]["type"] == "number"
-            assert schema["properties"]["b"]["type"] == "number"
+            assert "get_project_map_prompt" in tool_names
+            assert "submit_project_map" in tool_names
+            assert "get_module_prompt" in tool_names
+            assert "save_module_summary" in tool_names
 
 
 # ---------------------------------------------------------------------------
-# FR-4: tools/call 正常路径
+# FR-4: tools/call 正常路径（project_map 无环境变量时返回错误提示而非异常）
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("a", "b", "expected"),
-    [
-        (3, 5, "8"),
-        (-1, 1, "0"),
-        (1.5, 2.5, "4.0"),
-    ],
-)
-async def test_call_add_normal(a: float, b: float, expected: str) -> None:
+async def test_call_project_map_no_env() -> None:
+    """project_map without env var returns an error description string (isError=False)."""
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
-            result = await s.call_tool("add", {"a": a, "b": b})
+            result = await s.call_tool("project_map", {})
             assert result.isError is False
-            assert first_text(result) == expected
+            assert "CODESENSE_PROJECT_ROOT" in first_text(result)
 
 
 # ---------------------------------------------------------------------------
-# FR-5: tools/call 异常路径
+# FR-5: tools/call 异常路径（explore_module 参数校验）
 # ---------------------------------------------------------------------------
 
 
-async def test_call_add_missing_arg() -> None:
+async def test_call_explore_module_missing_arg() -> None:
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
-            result = await s.call_tool("add", {"a": 1})
+            result = await s.call_tool("explore_module", {})
             assert result.isError is True
             text = first_text(result)
             assert "缺失必填参数" in text
-            assert "'b'" in text
+            assert "'module_name'" in text
 
 
-async def test_call_add_type_error() -> None:
+async def test_call_explore_module_type_error() -> None:
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
-            result = await s.call_tool("add", {"a": "x", "b": 1})
+            result = await s.call_tool("explore_module", {"module_name": 123})
             assert result.isError is True
             text = first_text(result)
-            assert "期望 number" in text
+            assert "期望 string" in text
 
 
-async def test_call_add_extra_arg() -> None:
+async def test_call_explore_module_extra_arg() -> None:
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
-            result = await s.call_tool("add", {"a": 1, "b": 2, "c": 3})
+            result = await s.call_tool("explore_module", {"module_name": "缓存层", "extra": 1})
             assert result.isError is True
             text = first_text(result)
             assert "不允许的多余参数" in text
-            assert "'c'" in text
+            assert "'extra'" in text
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +115,9 @@ async def test_process_alive_after_errors() -> None:
     async with stdio_client(_params()) as (read, write):
         async with ClientSession(read, write) as s:
             await s.initialize()
-            await s.call_tool("add", {"a": 1})
-            await s.call_tool("add", {"a": "x", "b": 1})
-            await s.call_tool("add", {"a": 1, "b": 2, "c": 3})
+            await s.call_tool("explore_module", {})
+            await s.call_tool("explore_module", {"module_name": 123})
+            await s.call_tool("explore_module", {"module_name": "缓存层", "extra": 1})
 
-            result = await s.call_tool("add", {"a": 1, "b": 1})
+            result = await s.call_tool("project_map", {})
             assert result.isError is False
-            assert first_text(result) == "2"

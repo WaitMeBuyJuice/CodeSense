@@ -1,4 +1,4 @@
-"""MCP Tool: explore_module — returns module-level architecture understanding."""
+"""MCP Tool: explore_module — returns cached module-level architecture understanding."""
 
 from __future__ import annotations
 
@@ -6,16 +6,20 @@ import os
 from pathlib import Path
 from typing import Final
 
-from codesense_v1 import summarizer
-from codesense_v1.errors import InvalidArgumentError, LLMError
+from codesense_v1 import cache
+from codesense_v1.data.db import CodeGraphDB
+from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
+from codesense_v1.summarizer.summarizer import _compute_module_hash
+
+_CODESENSE_DIR = ".codesense"
 
 _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "properties": {
         "module_name": {
             "type": "string",
-            "description": "project_map 中列出的模块名（如 '缓存层'）",
+            "description": "project_map 中列出的模块名（精确名称）",
         }
     },
     "required": ["module_name"],
@@ -26,41 +30,140 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
 @tool(
     name="explore_module",
     description=(
-        "返回指定模块的架构理解：一句话描述、对外接口、内部文件、依赖模块。"
-        "适用场景：需要了解某模块、探寻某模块的作用或策略、改动某模块前需先了解其结构和接口契约、"
-        "理解模块间依赖关系。"
-        "不适用场景：仅需定位模块位置（用 project_map_tool 即可）、"
-        "已知确切文件路径或符号名（直接 grep/read_file）。"
-        "参数：module_name 必须是 project_map_tool 返回的模块列表中的某一项（精确名称）。"
-        "如果不知道有哪些模块，请先调用 project_map_tool 获取模块列表，"
-        "再用确切的模块名调用本工具，不要猜测模块名称。"
-        "返回结果由 LLM 生成，准确性依赖 project_map 阶段的模块划分。"
+        "返回指定模块的深度架构理解，包括：\n"
+        "- 一句话描述模块职责\n"
+        "- 对外接口（函数、类及签名）\n"
+        "- 内部文件列表及各文件职责\n"
+        "- 上游/下游依赖模块\n\n"
+        "当用户希望：\n"
+        "- 了解某功能的实现\n"
+        "- 修改某个功能，修改某个模块\n"
+        "- 了解某模块的作用、结构、如何运行\n"
+        "- 修改某模块前，理解其接口契约和依赖关系\n\n"
+        "参数 module_name 必须是 project_map 返回的模块名之一（精确匹配）。\n"
+        "不确定有哪些模块时，先调用 project_map 获取模块列表，不要猜测名称。\n\n"
+        "不适用场景：\n"
+        "- 只需知道功能属于哪个模块（使用 project_map）\n"
+        "- 需要查看具体函数实现或调用链（使用 CodeGraph 工具或 grep）\n\n"
+        "返回模块级架构描述，不含具体代码实现。\n"
+        "若缓存未就绪，工具会返回生成步骤，引导完成后重新调用。\n\n"
+        "示例：\n"
+        "- 用户问「缓存管理的作用？」→ explore_module(module_name=\"缓存管理\")\n"
+        "- 用户问「缓存管理模块是怎么实现的？」→ explore_module(module_name=\"缓存管理\")\n"
+        "- 用户问「数据层有哪些对外接口？」→ explore_module(module_name=\"数据层\")\n"
+        "- 准备修改某模块前 → 先 explore_module 该模块了解边界"
     ),
     input_schema=_EXPLORE_MODULE_INPUT_SCHEMA,
 )
 async def explore_module(module_name: str) -> str:
-    """Raises: InvalidArgumentError, LLMError (→ ToolError chain, handled by registry)."""
     module_name = module_name.strip()
     if not module_name:
-        raise InvalidArgumentError("参数错误：module_name 不能为空")
+        raise InvalidArgumentError(
+            "参数错误：module_name 不能为空。"
+            "请检查工具参数说明，补充必要参数后重新调用。"
+        )
 
     project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
     if not project_root_str:
         raise InvalidArgumentError("参数错误：环境变量 CODESENSE_PROJECT_ROOT 未设置")
 
     project_root = Path(project_root_str)
+    codesense_dir = project_root / _CODESENSE_DIR
+    db_path = project_root / ".codegraph" / "codegraph.db"
+    mkey = cache.safe_key(module_name)
 
-    try:
-        return await summarizer.module_summary(project_root, module_name)
-    except FileNotFoundError:
+    # DB existence check
+    if not db_path.exists():
         return (
             "# 错误\n\n"
             f"CodeGraph 数据库不存在（项目路径：{project_root}）。\n\n"
-            f"请先在该目录下运行 `codegraph init -i`，完成后重新调用 explore_module。"
+            "请先在该目录下运行 `codegraph init -i`，完成后重新调用 explore_module。"
         )
-    except LLMError as exc:
+
+    # modules_index must exist
+    index = cache.read_modules_index(codesense_dir)
+    if index is None:
         return (
-            "# 错误\n\n"
-            f"LLM 调用失败：{exc}\n\n"
-            "请检查 `CODESENSE_LLM_API_KEY` 等环境变量配置。"
+            "# 项目架构尚未生成\n\n"
+            "请先调用 `project_map` 完成项目架构概览的生成流程，"
+            "再调用 `explore_module`。"
         )
+
+    # L2 auxiliary directory check
+    raw_aux = index.get("auxiliary_dirs")
+    aux_list: list[dict[str, object]] = (
+        [a for a in raw_aux if isinstance(a, dict)]
+        if isinstance(raw_aux, list)
+        else []
+    )
+    norm_name = module_name.strip().lower()
+    for aux in aux_list:
+        if str(aux.get("name", "")).strip().lower() == norm_name:
+            category = str(aux.get("category", "辅助代码"))
+            file_count = aux.get("file_count", "?")
+            name = str(aux.get("name", module_name))
+            return (
+                f"# {name}\n\n"
+                f"此目录属于 **{category}**，包含约 {file_count} 个文件，"
+                "未做深入的模块结构分析。\n\n"
+                "如需了解其中的具体代码，请直接使用 `read_file` 或 codegraph 工具查询。"
+            )
+
+    # Find L1 entry
+    raw_modules = index.get("modules")
+    modules_list: list[dict[str, object]] = (
+        [m for m in raw_modules if isinstance(m, dict)]
+        if isinstance(raw_modules, list)
+        else []
+    )
+    entry: dict[str, object] | None = None
+    for m in modules_list:
+        if str(m.get("name", "")).strip().lower() == norm_name:
+            entry = m
+            break
+
+    if entry is None:
+        available_l1 = [str(m.get("name", "")) for m in modules_list]
+        available_l2 = [str(a.get("name", "")) for a in aux_list]
+        available = available_l1 + (
+            [f"{n}（辅助目录）" for n in available_l2] if available_l2 else []
+        )
+        raise InvalidArgumentError(
+            f"参数错误：模块 '{module_name}' 不存在。"
+            f"可用模块：{', '.join(available)}。"
+            f"请使用上述模块名之一重新调用 explore_module。"
+        )
+
+    # Per-module cache check
+    with CodeGraphDB(project_root) as db:
+        current_module_hash = _compute_module_hash(entry, db)
+
+    cached_md = cache.read_module(codesense_dir, mkey)
+    stored_hashes = cache.read_module_hashes(codesense_dir)
+    if cached_md is not None and stored_hashes.get(mkey) == current_module_hash:
+        return cached_md
+
+    # Cache miss → guide Agent through generation workflow
+    name = str(entry.get("name", module_name))
+    return (
+        f"# 模块「{name}」尚未生成摘要，必须按照以下内容生成摘要\n\n"
+        "请选择以下任一方式生成该模块的架构理解：\n\n"
+        "## 方式 1：委派给子 Agent（推荐，避免污染主对话上下文）\n\n"
+        "如果你的 Agent 框架支持子任务（如 `task` / `dispatch_subagent` / `Task` 工具），"
+        "请创建一个子 Agent 并让它执行以下任务：\n\n"
+        f"> 你是一个负责生成模块摘要的子 Agent。请按下列步骤完成任务：\n"
+        f"> 1. 调用 `get_module_prompt(module_name=\"{name}\")` 获取分析提示词\n"
+        "> 2. 阅读提示词，生成该模块的 Markdown 摘要，包含：\n"
+        ">    - 一句话描述\n"
+        ">    - 对外接口（函数/类签名）\n"
+        ">    - 内部文件清单及职责\n"
+        ">    - 依赖关系（上游/下游模块）\n"
+        f"> 3. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
+        "> 4. 完成后回复\"已完成\"\n\n"
+        f"子 Agent 完成后，主 Agent 重新调用 `explore_module(module_name=\"{name}\")` 即可获取最终摘要。\n\n"
+        "## 方式 2：主 Agent 直接执行（适用于无子 Agent 能力的场景）\n\n"
+        f"1. 调用 `get_module_prompt(module_name=\"{name}\")` 获取分析提示词\n"
+        "2. 阅读提示词，生成该模块的 Markdown 摘要（包含：一句话描述、对外接口、内部文件、依赖关系）\n"
+        f"3. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
+        f"4. 重新调用 `explore_module(module_name=\"{name}\")` 获取结果\n"
+    )

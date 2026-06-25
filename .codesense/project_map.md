@@ -6,30 +6,32 @@
 
 | 模块 | 职责 | 主要目录 |
 |------|------|---------|
-| 错误定义 | 定义工具与LLM相关错误类型 | `src/codesense_v1` |
-| 缓存管理 | 提供查询结果与中间数据的缓存能力 | `src/codesense_v1/cache` |
-| 数据管理 | 加载、组织并提供代码库相关数据访问 | `src/codesense_v1/data` |
-| LLM交互 | 封装大语言模型调用、提示构造与响应处理 | `src/codesense_v1/llm` |
-| 注册中心 | 统一注册和发现工具、资源等服务能力 | `src/codesense_v1/registry` |
-| MCP资源 | 定义并对外暴露可读的MCP资源 | `src/codesense_v1/resources` |
-| MCP服务端 | 启动MCP服务并协调请求、工具与资源调度 | `src/codesense_v1/server` |
-| 摘要生成 | 对代码库或代码实体生成结构化摘要 | `src/codesense_v1/summarizer` |
-| 工具实现 | 定义并执行代码分析相关的MCP工具 | `src/codesense_v1/tools` |
+| 错误定义 | 定义工具异常层次结构(ToolError/ValidationError/LLMError等) | `src/codesense_v1` |
+| 缓存层 | 管理 .codesense 缓存文件的读写、校验与失效 | `src/codesense_v1/cache` |
+| 数据层 | 封装 CodeGraph DB 查询、文件遍历与模块依赖聚合 | `src/codesense_v1/data` |
+| 工具注册 | 提供装饰器式工具注册与 JSON Schema 参数校验分发 | `src/codesense_v1/registry` |
+| MCP 服务 | 构建 MCP Server 并暴露 stdio 传输入口 | `src/codesense_v1/server` |
+| 摘要生成 | 生成项目架构概览与模块摘要的提示词及渲染逻辑 | `src/codesense_v1/summarizer` |
+| MCP 工具 | 定义对外暴露的 MCP 工具(project_map/explore_module等) | `src/codesense_v1/tools` |
 
 ## 模块间依赖
 
 | 来源模块 | 依赖模块 | 依赖类型 |
 |----------|----------|----------|
-| LLM交互 | 错误定义 | imports |
-| MCP服务端 | MCP资源 | imports |
-| MCP服务端 | 注册中心 | imports |
-| MCP资源 | 摘要生成 | imports |
-| MCP资源 | 错误定义 | imports |
-| 工具实现 | 摘要生成 | imports |
-| 工具实现 | 注册中心 | imports |
-| 工具实现 | 错误定义 | imports |
-| 摘要生成 | LLM交互 | imports |
-| 摘要生成 | 数据管理 | imports |
-| 摘要生成 | 缓存管理 | imports |
+| MCP 工具 | 工具注册 | imports |
+| MCP 工具 | 摘要生成 | imports |
+| MCP 工具 | 数据层 | imports |
+| MCP 工具 | 缓存层 | imports |
+| MCP 工具 | 错误定义 | imports |
+| MCP 服务 | 工具注册 | imports |
+| 工具注册 | 错误定义 | imports |
+| 摘要生成 | 数据层 | imports |
+| 摘要生成 | 缓存层 | imports |
 | 摘要生成 | 错误定义 | imports |
-| 注册中心 | 错误定义 | imports |
+
+## 其他目录
+
+| 目录 | 类型 | 文件数 |
+|------|------|--------|
+| `tests` | 测试代码 | 10 |
+| `scripts` | 辅助脚本 | 1 |

@@ -3,43 +3,49 @@ from __future__ import annotations
 import asyncio
 
 from mcp.server import Server
-from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, Resource, Tool
-from pydantic import AnyUrl
+from mcp.types import CallToolResult, Tool
 
 from codesense_v1 import registry
 from codesense_v1 import tools as _tools  # noqa: F401 — 触发工具注册
-from codesense_v1.resources import project_map as _pm
 
 SERVER_NAME: str = "CodeSense"
 SERVER_VERSION: str = "0.1.0"
 SERVER_INSTRUCTIONS: str = """\
-CodeSense provides architecture-level understanding built on top of CodeGraph \
-(which indexes symbols and call relationships). Use CodeSense for the \
-"what does this module do and how does it fit" questions; use CodeGraph for \
-"who calls this function" questions.
+CodeSense 用于帮助理解代码仓库的高层架构，包括项目组织方式、功能实现、模块作用职责、模块内部结构以及模块间协作关系。
+优先使用CodeSense内工具。
 
-Tools:
-- project_map_tool (Tool): Project-wide overview — module list, \
-one-line descriptions, cross-module dependencies. Call this tool \
-whenever you start on an unfamiliar codebase or need to locate \
-which module owns a feature. Prefer this over the codesense://project_map \
-resource, which is currently disabled due to client-side timeout limits.
-- explore_module (Tool): Module-level deep dive — public interface, internal files, \
-dependency modules. Call this before modifying any module, or when you need to \
-understand a module's boundaries and contracts.
+## 通用规则
 
-When to use what:
-- Starting a new task or unfamiliar with the codebase → call project_map_tool first
-- About to modify a module → call explore_module for that module first
-- Need a specific symbol or call chain → use CodeGraph MCP tools \
-(symbol lookup, callers, call chains)
-- Need exact code text → use grep / read_file
+- 不要猜：对于仓库特有的信息（模块职责、架构、依赖关系等），如果能够通过工具获得准确答案，\
+应优先调用工具，不要根据命名或经验推断。
 
-Prefer high-to-low abstraction: project_map_tool → explore_module → codegraph → grep/read_file. \
-Avoid jumping straight to grep for architecture questions — but direct grep/read_file is \
-fine when you already know the exact symbol or file.\
+## 何时优先使用 CodeSense
+
+当用户问题涉及以下意图时，**优先使用 CodeSense 工具**，而不是直接 grep 或读源码：
+
+- 项目整体结构、架构、技术分层、模块组成
+- "某功能在哪里"、"哪个模块负责 XX"
+- "修改某处会影响哪些地方"
+- "某模块怎么工作"、"它的对外接口是什么"
+- "两个模块之间是什么关系"
+- "为什么这里放在这个模块"
+- 第一次接触新代码库时定向
+
+## 工具调用顺序
+
+1. **整体优先** → `project_map`（项目架构、模块分布、跨模块依赖）
+2. **局部深入** → `explore_module`（单个模块的接口、内部结构、依赖关系）
+
+## 与其他工具的分工
+
+- 想问"谁调用了某函数" → 调用关系分析工具（例如 CodeGraph）
+- 已知确切文件/符号 → grep / read_file
+- 想理解"代码在系统里的位置和角色" → CodeSense
+
+## 缓存未就绪时
+
+如果某工具提示缓存未初始化，按照工具返回的引导完成初始化。\
 """
 
 
@@ -56,27 +62,6 @@ def build_server() -> Server:
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
     async def _call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
         return await registry.dispatch(name, arguments)
-
-    @server.list_resources()  # type: ignore[no-untyped-call, untyped-decorator]
-    async def _list_resources() -> list[Resource]:
-        return [
-            Resource(
-                uri=AnyUrl(_pm.RESOURCE_URI),
-                name=_pm.RESOURCE_NAME,
-                description=_pm.RESOURCE_DESCRIPTION,
-                mimeType=_pm.RESOURCE_MIME_TYPE,
-            )
-        ]
-
-    @server.read_resource()  # type: ignore[no-untyped-call, untyped-decorator]
-    async def _read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
-        content = (
-            "# 提示\n\n"
-            "`codesense://project_map` 资源当前已停用（存在客户端超时限制）。\n\n"
-            "请改用 **`project_map_tool`** 工具获取完全相同的项目架构概览，"
-            "该工具支持更长的超时时间，可正常完成 LLM 调用。"
-        )
-        return [ReadResourceContents(content=content, mime_type=_pm.RESOURCE_MIME_TYPE)]
 
     return server
 

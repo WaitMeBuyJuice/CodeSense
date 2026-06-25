@@ -1,4 +1,4 @@
-"""Summarizer: coordinates Data Layer + LLM + Cache to produce Markdown summaries."""
+"""Summarizer: coordinates Data Layer + Cache to produce Markdown summaries."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ import os
 import re
 from pathlib import Path
 
-from codesense_v1 import cache, llm
+from codesense_v1 import cache
 from codesense_v1.data.aggregate import directory_dependencies, directory_symbols
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.modules import list_modules, module_dependencies
-from codesense_v1.errors import InvalidArgumentError, LLMError
+from codesense_v1.errors import InvalidArgumentError
 
 _CODESENSE_DIR_NAME = ".codesense"
 _EXTERNAL_PREFIX = "external::"
@@ -208,17 +208,26 @@ def _leaf_dirs_from_files(file_paths: list[str]) -> set[str]:
     }
 
 
-def _normalize_dir(d: str, valid_dirs: set[str] | None) -> str | None:
-    """Clean a single directory string. Return None if invalid (when validating)."""
+def _normalize_dir(
+    d: str,
+    valid_dirs: set[str] | None,
+) -> tuple[str | None, bool]:
+    """Clean a single directory string.
+
+    Returns:
+        (normalized_dir, is_fuzzy): ``normalized_dir`` is ``None`` if the dir
+        cannot be matched; ``is_fuzzy`` is ``True`` when the result came from
+        fuzzy matching rather than an exact hit.
+    """
     d = d.strip().strip("`").strip("'").strip('"').rstrip("/").replace("\\", "/")
     if not d:
-        return None
+        return None, False
     if not valid_dirs:
-        return d
+        return d, False
     if d in valid_dirs:
-        return d
+        return d, False
     matches = difflib.get_close_matches(d, valid_dirs, n=1, cutoff=_FUZZY_CUTOFF)
-    return matches[0] if matches else None
+    return (matches[0], True) if matches else (None, False)
 
 
 def _dedup_description(desc: str) -> str:
@@ -230,68 +239,6 @@ def _dedup_description(desc: str) -> str:
 
 
 # ---------- public API -------------------------------------------------------
-
-
-async def project_map_summary(project_root: Path) -> str:
-    """Return project-level architecture summary as Markdown.
-
-    Lazy cache: if DB hash unchanged → return cached project_map.md.
-    Otherwise: auto-classify directories, call LLM for L1 module mapping,
-    render Markdown (with L2 auxiliary section), write cache, return.
-
-    Raises:
-        FileNotFoundError: if the CodeGraph DB does not exist.
-        LLMError: if the LLM call fails or returns unparseable JSON (after retry).
-    """
-    codesense_dir = project_root / _CODESENSE_DIR_NAME
-    db_path = project_root / ".codegraph" / "codegraph.db"
-
-    current_hash = cache.db_hash(db_path)
-
-    if _is_auto_expire_enabled():
-        if cache.is_cache_valid(codesense_dir, current_hash):
-            cached = cache.read_project_map(codesense_dir)
-            if cached is not None:
-                return cached
-        else:
-            cache.invalidate(codesense_dir)
-    else:
-        cached = cache.read_project_map(codesense_dir)
-        if cached is not None:
-            return cached
-
-    with CodeGraphDB(project_root) as db:
-        modules_data = list_modules(db)
-        edges = module_dependencies(db, include_external=False)
-        dir_deps = directory_dependencies(
-            edges, modules_data, include_external=False, include_self_loops=False
-        )
-        dir_syms = directory_symbols(db, max_per_dir=50)
-        all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
-
-    roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
-
-    all_file_paths = [
-        p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
-    ]
-    dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
-    dir_deps = _filter_dir_deps(dir_deps, roots)
-
-    valid_dirs: set[str] = (
-        set(dir_deps.keys())
-        | set(dir_syms.keys())
-        | _leaf_dirs_from_files(all_file_paths)
-    )
-    prompt = _build_project_map_prompt(dir_deps, dir_syms, roots=roots)
-    modules_json = await _call_llm_for_modules(prompt, valid_dirs=valid_dirs)
-
-    expanded = _expand_module_files(modules_json, all_file_paths)
-
-    cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
-
-    markdown = _render_project_map_markdown(expanded, dir_deps, aux_dirs=aux_dirs)
-    cache.write_project_map(codesense_dir, markdown, current_hash)
-    return markdown
 
 
 def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
@@ -312,31 +259,97 @@ def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
     return hashlib.sha1(content.encode("utf-8")).hexdigest()  # noqa: S324
 
 
-async def module_summary(project_root: Path, module_name: str) -> str:
-    """Return module-level summary as Markdown for *module_name*.
+async def get_project_map_prompt(project_root: Path) -> str:
+    """Return the prompt that would be sent to LLM for project-level module mapping.
 
-    Cache invalidation is per-module: only regenerates when the module's own
-    files or symbols change, regardless of global DB hash.
+    Raises:
+        FileNotFoundError: if the CodeGraph DB does not exist.
+    """
+    with CodeGraphDB(project_root) as db:
+        modules_data = list_modules(db)
+        edges = module_dependencies(db, include_external=False)
+        dir_deps = directory_dependencies(
+            edges, modules_data, include_external=False, include_self_loops=False
+        )
+        dir_syms = directory_symbols(db, max_per_dir=50)
+        all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
-    *module_name* must match a name in ``.codesense/modules_index.json``
-    (case-insensitive, trimmed).  If the index does not exist yet, raises
-    ``InvalidArgumentError`` asking the caller to read ``project_map`` first.
+    roots, _ = _resolve_roots_and_aux(all_file_paths)
+    dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+    dir_deps = _filter_dir_deps(dir_deps, roots)
+    return _build_project_map_prompt(dir_deps, dir_syms, roots=roots)
+
+
+async def submit_project_map(project_root: Path, response: str) -> str:
+    """Process a pipe-delimited module-list *response* and write project_map cache.
+
+    *response* must follow the same format the project_map LLM prompt requests::
+
+        模块名|一句话职责|目录1,目录2
+
+    Returns the rendered ``project_map.md`` Markdown.
+
+    Raises:
+        FileNotFoundError: if the CodeGraph DB does not exist.
+        InvalidArgumentError: if *response* cannot be parsed into any modules.
+    """
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+    db_path = project_root / ".codegraph" / "codegraph.db"
+    current_hash = cache.db_hash(db_path)
+
+    with CodeGraphDB(project_root) as db:
+        modules_data = list_modules(db)
+        edges = module_dependencies(db, include_external=False)
+        dir_deps = directory_dependencies(
+            edges, modules_data, include_external=False, include_self_loops=False
+        )
+        dir_syms = directory_symbols(db, max_per_dir=50)
+        all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
+
+    roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
+    all_file_paths_l1 = [
+        p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
+    ]
+    dir_deps_l1 = _filter_dir_deps(dir_deps, roots)
+    dir_syms_l1 = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+    valid_dirs: set[str] = (
+        set(dir_deps_l1.keys())
+        | set(dir_syms_l1.keys())
+        | _leaf_dirs_from_files(all_file_paths_l1)
+    )
+
+    warnings: list[str] = []
+    modules_json = _parse_modules_text(response, valid_dirs, warnings=warnings)
+    if not modules_json:
+        raise InvalidArgumentError(
+            "解析失败：无法从响应中提取有效模块。"
+            "请确保每行格式为「模块名|职责|目录」，不含多余内容。"
+        )
+
+    expanded = _expand_module_files(modules_json, all_file_paths_l1)
+    cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
+    markdown = _render_project_map_markdown(expanded, dir_deps_l1, aux_dirs=aux_dirs)
+    cache.write_project_map(codesense_dir, markdown, current_hash)
+
+    if warnings:
+        warning_block = "\n\n---\n\n## ⚠️ 解析警告\n\n" + "\n".join(f"- {w}" for w in warnings)
+        return markdown + warning_block
+    return markdown
+
+
+async def get_module_prompt(project_root: Path, module_name: str) -> str:
+    """Return the prompt that would be sent to LLM for a specific module summary.
 
     Raises:
         InvalidArgumentError: if modules_index is missing or module_name not found.
         FileNotFoundError: if the CodeGraph DB does not exist.
-        LLMError: if the LLM call fails.
     """
     codesense_dir = project_root / _CODESENSE_DIR_NAME
-    db_path = project_root / ".codegraph" / "codegraph.db"
-
-    current_hash = cache.db_hash(db_path)
-    mkey = cache.safe_key(module_name)
 
     index = cache.read_modules_index(codesense_dir)
     if index is None:
         raise InvalidArgumentError(
-            "参数错误：尚未生成模块划分，请先读取 codesense://project_map 资源"
+            "参数错误：尚未生成模块划分，请先调用 project_map 生成模块划分"
         )
 
     raw_modules = index.get("modules")
@@ -345,54 +358,19 @@ async def module_summary(project_root: Path, module_name: str) -> str:
         if isinstance(raw_modules, list)
         else []
     )
-
-    # Check L2 auxiliary dirs first
-    raw_aux = index.get("auxiliary_dirs")
-    aux_list: list[dict[str, object]] = (
-        [a for a in raw_aux if isinstance(a, dict)]
-        if isinstance(raw_aux, list)
-        else []
-    )
     norm_name = module_name.strip().lower()
-    for aux in aux_list:
-        if str(aux.get("name", "")).strip().lower() == norm_name:
-            category = str(aux.get("category", "辅助代码"))
-            file_count = aux.get("file_count", "?")
-            name = str(aux.get("name", module_name))
-            return (
-                f"# {name}\n\n"
-                f"此目录属于 **{category}**，包含约 {file_count} 个文件，"
-                "未做深入的模块结构分析。\n\n"
-                "如需了解其中的具体代码，请直接使用 `read_file` 或 codegraph 工具查询。"
-            )
-
     entry: dict[str, object] | None = None
     for m in modules_list:
         if str(m.get("name", "")).strip().lower() == norm_name:
             entry = m
             break
-
     if entry is None:
-        available_l1 = [str(m.get("name", "")) for m in modules_list]
-        available_l2 = [str(a.get("name", "")) for a in aux_list]
-        available = available_l1 + (
-            [f"{n}（辅助目录）" for n in available_l2] if available_l2 else []
-        )
+        available = [str(m.get("name", "")) for m in modules_list]
         raise InvalidArgumentError(
-            f"参数错误：模块 '{module_name}' 不存在。"
-            f"可用模块：{', '.join(available)}。"
-            f"请使用上述模块名之一重新调用 explore_module。"
+            f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
         )
 
     with CodeGraphDB(project_root) as db:
-        current_module_hash = _compute_module_hash(entry, db)
-
-        # Per-module cache check: only regenerate if this module's content changed
-        cached_md = cache.read_module(codesense_dir, mkey)
-        stored_hashes = cache.read_module_hashes(codesense_dir)
-        if cached_md is not None and stored_hashes.get(mkey) == current_module_hash:
-            return cached_md
-
         modules_data = list_modules(db)
         edges = module_dependencies(db, include_external=False)
         dir_deps = directory_dependencies(
@@ -410,134 +388,56 @@ async def module_summary(project_root: Path, module_name: str) -> str:
                 f"- `{node.name}` ({node.kind}): {sig}"
             )
 
-    prompt = _build_module_prompt(entry, dir_deps, file_symbols)
-    summary = await llm.call_llm(prompt)
-    cache.write_module(
-        codesense_dir, mkey, str(entry.get("name", module_name)), summary,
-        current_hash, current_module_hash,
-    )
-    return summary
+    return _build_module_prompt(entry, dir_deps, file_symbols)
 
 
-# ---------- private: LLM call for module list (pipe-delimited text) ----------
+def save_module_summary(project_root: Path, module_name: str, summary: str) -> None:
+    """Write *summary* to cache for *module_name*, updating per-module hash.
 
-
-async def _call_llm_for_modules(
-    initial_prompt: str,
-    valid_dirs: set[str] | None = None,
-) -> list[dict[str, object]]:
-    """Call LLM, parse modules, then validate & repair against *valid_dirs*.
-
-    Repair pipeline (only when ``valid_dirs`` is provided):
-      1. Drop / fuzzy-correct directories not in ``valid_dirs`` (inside parser).
-      2. If any directory is still uncovered, run one more LLM call asking it
-         to assign the missing directories.
-      3. If anything still missing, append a deterministic fallback module
-         ``"其他"`` so coverage is total.
+    Raises:
+        FileNotFoundError: if the CodeGraph DB does not exist.
+        InvalidArgumentError: if modules_index is missing or module_name not found.
     """
-    response = await llm.call_llm(initial_prompt)
-    modules = _parse_modules_text(response, valid_dirs)
-    if not modules:
-        retry_prompt = (
-            initial_prompt
-            + "\n\n前次输出解析为空，请确保每行严格遵循「模块名|职责|目录」格式，"
-            "不要输出任何其他内容（不要标题行、不要编号、不要 Markdown）。"
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+    db_path = project_root / ".codegraph" / "codegraph.db"
+    current_hash = cache.db_hash(db_path)
+    mkey = cache.safe_key(module_name)
+
+    index = cache.read_modules_index(codesense_dir)
+    if index is None:
+        raise InvalidArgumentError(
+            "参数错误：尚未生成模块划分，请先调用 project_map 生成模块划分"
         )
-        response2 = await llm.call_llm(retry_prompt)
-        modules = _parse_modules_text(response2, valid_dirs)
-        if not modules:
-            raise LLMError("LLM 未输出有效的模块列表（已重试一次）")
-
-    if not valid_dirs:
-        return modules
-
-    missing = _missing_dirs(modules, valid_dirs)
-    if missing:
-        modules = await _fill_missing_dirs(modules, missing, valid_dirs)
-
-    missing_final = _missing_dirs(modules, valid_dirs)
-    if missing_final:
-        modules.append(
-            {
-                "name": _FALLBACK_MODULE_NAME,
-                "description": _FALLBACK_MODULE_DESC,
-                "directories": sorted(missing_final),
-            }
-        )
-    return modules
-
-
-def _missing_dirs(
-    modules: list[dict[str, object]], valid_dirs: set[str]
-) -> set[str]:
-    covered: set[str] = set()
-    for m in modules:
-        dirs_raw = m.get("directories")
-        if isinstance(dirs_raw, list):
-            covered.update(str(d) for d in dirs_raw)
-    return valid_dirs - covered
-
-
-async def _fill_missing_dirs(
-    modules: list[dict[str, object]],
-    missing: set[str],
-    valid_dirs: set[str],
-) -> list[dict[str, object]]:
-    """Ask LLM to assign *missing* dirs into existing or new modules."""
-    existing_names = [str(m.get("name", "")) for m in modules]
-    fill_prompt = (
-        "上一轮模块划分遗漏了以下目录，请把它们分配到已有模块或新增模块。\n\n"
-        "## 已有模块\n"
-        + "\n".join(f"- {n}" for n in existing_names)
-        + "\n\n## 未分配目录\n"
-        + "\n".join(f"- `{d}`" for d in sorted(missing))
-        + "\n\n## 输出格式\n"
-        "每行一个模块（仅输出涉及未分配目录的模块），用竖线（|）分隔三列：\n"
-        "  模块名|一句话职责|所属目录（多目录用英文逗号分隔）\n"
-        "- 若复用已有模块，模块名必须与上方完全一致\n"
-        "- 不要输出标题行、编号、Markdown 或其他内容\n"
+    raw_modules = index.get("modules")
+    modules_list: list[dict[str, object]] = (
+        [m for m in raw_modules if isinstance(m, dict)]
+        if isinstance(raw_modules, list)
+        else []
     )
-    response = await llm.call_llm(fill_prompt)
-    extra = _parse_modules_text(response, valid_dirs)
+    norm_name = module_name.strip().lower()
+    entry: dict[str, object] | None = None
+    for m in modules_list:
+        if str(m.get("name", "")).strip().lower() == norm_name:
+            entry = m
+            break
+    if entry is None:
+        available = [str(m.get("name", "")) for m in modules_list]
+        raise InvalidArgumentError(
+            f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
+        )
 
-    by_name: dict[str, dict[str, object]] = {
-        str(m.get("name", "")).strip().lower(): m for m in modules
-    }
-    for m in extra:
-        key = str(m.get("name", "")).strip().lower()
-        m_dirs_raw = m.get("directories")
-        m_dirs: list[str] = [
-            str(d) for d in (m_dirs_raw if isinstance(m_dirs_raw, list) else [])
-        ]
-        if key in by_name:
-            target = by_name[key]
-            tgt_dirs_raw = target.get("directories")
-            tgt_dirs: list[str] = [
-                str(d) for d in (tgt_dirs_raw if isinstance(tgt_dirs_raw, list) else [])
-            ]
-            for d in m_dirs:
-                if d not in tgt_dirs and d in missing:
-                    tgt_dirs.append(d)
-            target["directories"] = tgt_dirs
-        else:
-            kept = [d for d in m_dirs if d in missing]
-            if kept:
-                modules.append(
-                    {
-                        "name": m.get("name", ""),
-                        "description": m.get("description", ""),
-                        "directories": kept,
-                    }
-                )
-                by_name[key] = modules[-1]
-    return modules
+    with CodeGraphDB(project_root) as db:
+        module_hash = _compute_module_hash(entry, db)
+
+    cache.write_module(codesense_dir, mkey, module_name, summary, current_hash, module_hash)
 
 
 def _parse_modules_text(
     response: str,
     valid_dirs: set[str] | None = None,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, object]]:
-    """Parse pipe-delimited module list from LLM response.
+    """Parse pipe-delimited module list from LLM/Agent response.
 
     Expected line format::
 
@@ -545,13 +445,17 @@ def _parse_modules_text(
 
     When *valid_dirs* is provided, every directory must either match a member
     of *valid_dirs* exactly or be within fuzzy-match distance; otherwise it is
-    silently dropped. Description fields are split by Chinese/ASCII commas,
+    dropped. Description fields are split by Chinese/ASCII commas,
     deduplicated while preserving order, and truncated to 60 chars to fix the
     "add、add、list" class of LLM hallucinations.
 
+    When *warnings* is provided (a mutable list), it is populated with:
+    - fuzzy-correction messages (directory was rewritten)
+    - drop messages (directory was already claimed by another module)
+    - skip messages (module had no valid directory)
+
     Malformed lines are silently skipped; duplicate names and overlapping
-    directories are deduplicated so a single bad line never breaks the whole
-    result.
+    directories are deduplicated.
     """
     modules: list[dict[str, object]] = []
     seen_names: set[str] = set()
@@ -573,18 +477,35 @@ def _parse_modules_text(
         dirs_str = parts[2]
         dirs: list[str] = []
         for raw in dirs_str.split(","):
-            normalized = _normalize_dir(raw, valid_dirs)
+            normalized, is_fuzzy = _normalize_dir(raw, valid_dirs)
             if normalized is not None:
                 dirs.append(normalized)
+                if is_fuzzy and warnings is not None:
+                    raw_clean = raw.strip()
+                    warnings.append(
+                        f"⚠️ 目录修正：「{name}」的目录 `{raw_clean}` "
+                        f"未精确匹配，已自动修正为 `{normalized}`"
+                    )
+            elif warnings is not None and raw.strip():
+                warnings.append(
+                    f"⚠️ 目录无效：「{name}」的目录 `{raw.strip()}` "
+                    f"在代码库中不存在，已忽略"
+                )
         clean_dirs: list[str] = []
         for d in dirs:
-            if not any(
-                d == s or d.startswith(s + "/") or s.startswith(d + "/")
-                for s in seen_dirs
-            ):
+            if d not in seen_dirs:
                 clean_dirs.append(d)
                 seen_dirs.append(d)
+            elif warnings is not None:
+                warnings.append(
+                    f"⚠️ 目录冲突：「{name}」的目录 `{d}` "
+                    f"已被其他模块占用，已忽略"
+                )
         if not clean_dirs:
+            if warnings is not None:
+                warnings.append(
+                    f"⚠️ 模块跳过：「{name}」没有有效目录，整个模块被跳过"
+                )
             continue
         seen_names.add(name.lower())
         modules.append({"name": name, "description": desc, "directories": clean_dirs})
@@ -599,7 +520,21 @@ def _expand_module_files(
     modules_json: list[dict[str, object]],
     all_file_paths: list[str],
 ) -> list[dict[str, object]]:
-    """Expand ``directories`` in each module entry to a concrete ``files`` list."""
+    """Expand ``directories`` in each module entry to a concrete ``files`` list.
+
+    When a module claims a parent directory (e.g. ``src/core``) and another
+    module explicitly claims a sub-directory (e.g. ``src/core/utils``), the
+    parent module's files exclude the sub-directory's files so there is no
+    overlap between modules.
+    """
+    # Collect all claimed directories across all modules
+    all_claimed: set[str] = {
+        str(d).rstrip("/")
+        for m in modules_json
+        for d in (m.get("directories") or [])
+        if d
+    }
+
     result: list[dict[str, object]] = []
     for m in modules_json:
         dirs_raw = m.get("directories")
@@ -608,12 +543,23 @@ def _expand_module_files(
             for d in (dirs_raw if isinstance(dirs_raw, list) else [])
             if d
         ]
+        # Sub-directories that are explicitly claimed by OTHER modules
+        excluded: set[str] = {
+            c for c in all_claimed
+            if c not in set(dirs)
+            and any(c.startswith(d + "/") for d in dirs)
+        }
         matched: list[str] = []
         for fp in all_file_paths:
             fp_norm = fp.rstrip("/")
             for d in dirs:
                 if fp_norm == d or fp_norm.startswith(d + "/"):
-                    matched.append(fp)
+                    # Skip if this file belongs to an excluded sub-directory
+                    if not any(
+                        fp_norm == ex or fp_norm.startswith(ex + "/")
+                        for ex in excluded
+                    ):
+                        matched.append(fp)
                     break
         result.append(
             {
@@ -826,7 +772,7 @@ def _build_module_prompt(
         "你是一位软件架构师，请根据以下模块结构数据，生成一份**模块理解文档**。\n\n"
         "## 要求\n\n"
         "输出为 Markdown 格式，包含：\n"
-        "1. **一句话描述**：该模块的核心职责（不超过 30 字）\n"
+        "1. **概述**：该模块的核心职责（不超过 50 字）\n"
         "2. **对外接口**：列出该模块对外暴露的函数/类（参考语言惯例：Python 看名称是否以 _ 开头；"
         "TypeScript/JS 看是否 export；其他语言依据签名特征推断）\n"
         "   注意：请**仅列出下方「模块内符号」中实际存在的符号**，不要编造不存在的接口\n"
