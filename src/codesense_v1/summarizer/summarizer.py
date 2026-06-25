@@ -25,6 +25,7 @@ from codesense_v1.data.docstrings import (
     is_enabled as _docstrings_enabled,
 )
 from codesense_v1.data.modules import list_modules, module_dependencies
+from codesense_v1.data.ref_docs import ref_docs_prompt_section
 from codesense_v1.errors import InvalidArgumentError
 
 _CODESENSE_DIR_NAME = ".codesense"
@@ -376,6 +377,7 @@ async def get_project_map_prompt(project_root: Path) -> str:
         cycles=cycles,
         ext_by_dir=ext_by_dir,
         dir_file_docstrings=dir_file_docstrings,
+        ref_docs_section=ref_docs_prompt_section(project_root),
     )
 
 
@@ -594,6 +596,7 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
         external_deps=sorted(ext_deps),
         file_docstrings=file_docstrings,
         symbol_docstrings=symbol_docstrings,
+        ref_docs_section=ref_docs_prompt_section(project_root),
     )
 
 
@@ -877,6 +880,7 @@ def _build_project_map_prompt(
     cycles: list[list[str]] | None = None,
     ext_by_dir: dict[str, list[str]] | None = None,
     dir_file_docstrings: dict[str, str] | None = None,
+    ref_docs_section: str = "",
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
     all_dirs_set = set(all_dirs)
@@ -985,7 +989,8 @@ def _build_project_map_prompt(
         f"{layer_section_str}\n\n"
         "### 目录间依赖（仅内部依赖）\n"
         f"{dep_section}\n\n"
-        "## 输出格式\n\n"
+        + (f"## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
+        + "## 输出格式\n\n"
         "每行一个模块，用竖线（|）分隔三列：\n"
         "  模块名|一句话职责|所属目录（多目录用英文逗号分隔）\n\n"
         "示例行：\n"
@@ -1011,6 +1016,7 @@ def _build_module_prompt(
     external_deps: list[str] | None = None,
     file_docstrings: dict[str, str] | None = None,
     symbol_docstrings: dict[str, str] | None = None,
+    ref_docs_section: str = "",
 ) -> str:
     name = str(entry.get("name", ""))
     description = str(entry.get("description", ""))
@@ -1119,5 +1125,6 @@ def _build_module_prompt(
         f"### 模块内符号（函数/类/方法，含签名）\n{symbols_txt}\n\n"
         f"### 上游依赖（该模块依赖的目录）\n{outbound_txt}\n\n"
         f"### 下游依赖（依赖该模块的目录）\n{inbound_txt}\n"
-        f"{_DATA_TRUST_NOTICE}"
+        + (f"\n## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
+        + f"{_DATA_TRUST_NOTICE}"
     )

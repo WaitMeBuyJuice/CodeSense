@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-25T06:33:20.692454+00:00",
+  "generated_at": "2026-06-25T08:01:44.927949+00:00",
   "modules": [
     {
-      "name": "异常定义",
-      "description": "定义工具领域异常基类与具体错误类型",
+      "name": "异常基类",
+      "description": "定义工具领域可预期业务与校验异常基类",
       "directories": [
         "src/codesense_v1"
       ],
@@ -25,7 +25,7 @@
     },
     {
       "name": "数据层",
-      "description": "封装 CodeGraph DB 查询与目录依赖聚合",
+      "description": "封装 CodeGraph DB 查询与目录级依赖聚合",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -36,12 +36,13 @@
         "src/codesense_v1/data/db.py",
         "src/codesense_v1/data/docstrings.py",
         "src/codesense_v1/data/files.py",
-        "src/codesense_v1/data/modules.py"
+        "src/codesense_v1/data/modules.py",
+        "src/codesense_v1/data/ref_docs.py"
       ]
     },
     {
       "name": "工具注册",
-      "description": "注册并分发 MCP 工具调用",
+      "description": "负责 MCP 工具的注册、JSON Schema 校验与分发",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -51,8 +52,8 @@
       ]
     },
     {
-      "name": "摘要生成",
-      "description": "协调数据层与缓存层生成 Markdown 摘要",
+      "name": "摘要引擎",
+      "description": "协调数据层与缓存层生成模块架构 Markdown 摘要",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -62,20 +63,8 @@
       ]
     },
     {
-      "name": "MCP 服务",
-      "description": "构建并运行 MCP stdio 服务入口",
-      "directories": [
-        "src/codesense_v1/server"
-      ],
-      "files": [
-        "src/codesense_v1/server/__init__.py",
-        "src/codesense_v1/server/__main__.py",
-        "src/codesense_v1/server/server.py"
-      ]
-    },
-    {
       "name": "MCP 工具",
-      "description": "暴露 project_map 与 explore_module 等 MCP 工具",
+      "description": "暴露 explore_module、project_map 等 MCP 工具入口",
       "directories": [
         "src/codesense_v1/tools"
       ],
@@ -87,6 +76,18 @@
         "src/codesense_v1/tools/project_map.py",
         "src/codesense_v1/tools/save_module_summary.py",
         "src/codesense_v1/tools/submit_project_map.py"
+      ]
+    },
+    {
+      "name": "服务入口",
+      "description": "构建 MCP Server 并通过 stdio 传输启动服务",
+      "directories": [
+        "src/codesense_v1/server"
+      ],
+      "files": [
+        "src/codesense_v1/server/__init__.py",
+        "src/codesense_v1/server/__main__.py",
+        "src/codesense_v1/server/server.py"
       ]
     }
   ],

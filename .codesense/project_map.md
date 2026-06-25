@@ -6,28 +6,28 @@
 
 | 模块 | 职责 | 主要目录 |
 |------|------|---------|
-| 异常定义 | 定义工具领域异常基类与具体错误类型 | `src/codesense_v1` |
+| 异常基类 | 定义工具领域可预期业务与校验异常基类 | `src/codesense_v1` |
 | 缓存层 | 管理 .codesense 缓存文件的读写与失效 | `src/codesense_v1/cache` |
-| 数据层 | 封装 CodeGraph DB 查询与目录依赖聚合 | `src/codesense_v1/data` |
-| 工具注册 | 注册并分发 MCP 工具调用 | `src/codesense_v1/registry` |
-| 摘要生成 | 协调数据层与缓存层生成 Markdown 摘要 | `src/codesense_v1/summarizer` |
-| MCP 服务 | 构建并运行 MCP stdio 服务入口 | `src/codesense_v1/server` |
-| MCP 工具 | 暴露 project_map 与 explore_module 等 MCP 工具 | `src/codesense_v1/tools` |
+| 数据层 | 封装 CodeGraph DB 查询与目录级依赖聚合 | `src/codesense_v1/data` |
+| 工具注册 | 负责 MCP 工具的注册、JSON Schema 校验与分发 | `src/codesense_v1/registry` |
+| 摘要引擎 | 协调数据层与缓存层生成模块架构 Markdown 摘要 | `src/codesense_v1/summarizer` |
+| MCP 工具 | 暴露 explore_module、project_map 等 MCP 工具入口 | `src/codesense_v1/tools` |
+| 服务入口 | 构建 MCP Server 并通过 stdio 传输启动服务 | `src/codesense_v1/server` |
 
 ## 模块间依赖
 
 | 来源模块 | 依赖模块 | 依赖类型 |
 |----------|----------|----------|
 | MCP 工具 | 工具注册 | imports |
-| MCP 工具 | 异常定义 | imports |
-| MCP 工具 | 摘要生成 | imports |
+| MCP 工具 | 异常基类 | imports |
+| MCP 工具 | 摘要引擎 | imports |
 | MCP 工具 | 数据层 | imports |
 | MCP 工具 | 缓存层 | imports |
-| MCP 服务 | 工具注册 | imports |
-| 工具注册 | 异常定义 | imports |
-| 摘要生成 | 异常定义 | imports |
-| 摘要生成 | 数据层 | imports |
-| 摘要生成 | 缓存层 | imports |
+| 工具注册 | 异常基类 | imports |
+| 摘要引擎 | 异常基类 | imports |
+| 摘要引擎 | 数据层 | imports |
+| 摘要引擎 | 缓存层 | imports |
+| 服务入口 | 工具注册 | imports |
 
 ## 其他目录
 
