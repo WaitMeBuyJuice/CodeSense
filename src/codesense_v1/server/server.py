@@ -13,7 +13,7 @@ SERVER_NAME: str = "CodeSense"
 SERVER_VERSION: str = "0.1.0"
 SERVER_INSTRUCTIONS: str = """\
 CodeSense 用于帮助理解代码仓库的高层架构，包括项目组织方式、功能实现、模块作用职责、模块内部结构以及模块间协作关系。
-优先使用CodeSense内工具。
+优先使用CodeSense内工具，若信息不全可通过grep/read_file探索源码。
 
 ## 通用规则
 

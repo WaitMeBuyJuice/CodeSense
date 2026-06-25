@@ -19,6 +19,11 @@ from codesense_v1.data.architecture import (
     topological_layers,
 )
 from codesense_v1.data.db import CodeGraphDB
+from codesense_v1.data.docstrings import (
+    extract_file_docstring,
+    extract_symbol_docstrings,
+    is_enabled as _docstrings_enabled,
+)
 from codesense_v1.data.modules import list_modules, module_dependencies
 from codesense_v1.errors import InvalidArgumentError
 
@@ -59,6 +64,56 @@ _AUXILIARY_CATEGORY: dict[str, str] = {
 # Regex to detect root-level filenames mistakenly treated as directories
 # (e.g. "vitest.config.mts/").
 _HAS_EXTENSION_RE = re.compile(r"\.[a-zA-Z0-9]+$")
+
+_EXT_TO_LANG: dict[str, str] = {
+    ".py": "python",
+    ".ts": "typescript", ".tsx": "typescriptreact",
+    ".js": "javascript", ".jsx": "javascriptreact",
+    ".go": "go",
+    ".rs": "rust",
+    ".erl": "erlang", ".hrl": "erlang",
+    ".rb": "ruby",
+    ".sh": "shell", ".bash": "bash",
+}
+
+
+def _lang_from_path(path: str) -> str:
+    """Infer language from file extension; returns empty string if unknown."""
+    return _EXT_TO_LANG.get(Path(path).suffix.lower(), "")
+
+
+# Symbol names that are too generic to convey semantics without a docstring.
+_GENERIC_SYMBOL_NAMES: frozenset[str] = frozenset(
+    {
+        "run", "execute", "process", "handle", "do", "call", "invoke",
+        "start", "stop", "init", "setup", "teardown", "main",
+        "update", "create", "delete", "get", "set", "load", "save",
+        "build", "parse", "validate", "check", "test",
+    }
+)
+
+# Directory-name fragments that suggest an entry / adapter layer.
+_ENTRY_LAYER_HINTS: frozenset[str] = frozenset(
+    {"tool", "tools", "server", "cli", "cmd", "api", "main", "bin", "app", "handler", "endpoint"}
+)
+
+
+def _is_generic_name(name: str) -> bool:
+    """Return True if *name* is too generic to understand without a docstring."""
+    base = name.lstrip("_").lower()
+    return (
+        base in _GENERIC_SYMBOL_NAMES
+        or any(base.startswith(p) for p in ("on_", "do_", "handle_"))
+    )
+
+
+def _looks_like_entry_layer(directories: list[str]) -> bool:
+    """Return True if any directory path fragment suggests an entry/service layer."""
+    for d in directories:
+        for part in d.replace("\\", "/").split("/"):
+            if part.lower() in _ENTRY_LAYER_HINTS:
+                return True
+    return False
 
 
 def _is_auto_expire_enabled() -> bool:
@@ -281,7 +336,11 @@ async def get_project_map_prompt(project_root: Path) -> str:
             edges_internal, modules_data, include_external=False, include_self_loops=False
         )
         dir_syms = directory_symbols(db, max_per_dir=50)
-        all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
+        all_file_rows = list(db.iter_files())
+        all_file_paths: list[str] = [f.path.replace("\\", "/") for f in all_file_rows]
+        file_languages: dict[str, str] = {
+            f.path.replace("\\", "/"): f.language for f in all_file_rows
+        }
 
     roots, _ = _resolve_roots_and_aux(all_file_paths)
     dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
@@ -292,6 +351,22 @@ async def get_project_map_prompt(project_root: Path) -> str:
     cycles = find_cycles(edges_internal, modules_data)
     ext_by_dir = external_dependencies_by_dir(edges_all, modules_data)
 
+    # Extract one representative file docstring per directory.
+    dir_file_docstrings: dict[str, str] = {}
+    if _docstrings_enabled():
+        for d, syms in dir_syms.items():
+            # Unique file paths in this dir, ordered by first appearance.
+            seen: dict[str, None] = {}
+            for s in syms:
+                fp = s["file"].replace("\\", "/")
+                seen[fp] = None
+            for fp in seen:
+                lang = file_languages.get(fp) or _lang_from_path(fp)
+                doc = extract_file_docstring(project_root / fp, lang)
+                if doc:
+                    dir_file_docstrings[d] = doc
+                    break
+
     return _build_project_map_prompt(
         dir_deps,
         dir_syms,
@@ -300,7 +375,60 @@ async def get_project_map_prompt(project_root: Path) -> str:
         layers=layers,
         cycles=cycles,
         ext_by_dir=ext_by_dir,
+        dir_file_docstrings=dir_file_docstrings,
     )
+
+
+def _migrate_renamed_module_caches(
+    codesense_dir: Path,
+    new_modules: list[dict[str, object]],
+    db: CodeGraphDB,
+) -> None:
+    """Reuse existing .md caches when a module is renamed but content unchanged.
+
+    Computes module_hash for each new module and checks whether any old module
+    (not in the new index) has the same hash.  When a 1-to-1 match is found,
+    the old ``.md`` file is renamed to the new key and the ``.hashes.json``
+    entry is updated accordingly.  The old key will then be cleaned up by
+    ``_prune_stale_modules`` in the subsequent ``write_modules_index`` call.
+    """
+    existing_hashes = cache.read_module_hashes(codesense_dir)
+    if not existing_hashes:
+        return
+
+    new_keys: set[str] = {
+        cache.safe_key(str(m.get("name", ""))) for m in new_modules
+    }
+
+    # Build hash → new_key mapping; mark collisions (same hash for two new modules)
+    hash_to_new_key: dict[str, str] = {}
+    for m in new_modules:
+        mkey = cache.safe_key(str(m.get("name", "")))
+        h = _compute_module_hash(m, db)
+        if h in hash_to_new_key:
+            hash_to_new_key[h] = ""  # collision sentinel
+        else:
+            hash_to_new_key[h] = mkey
+
+    modules_dir = codesense_dir / "modules"
+
+    for old_key, old_hash in existing_hashes.items():
+        if old_key in new_keys:
+            continue  # same name survives, nothing to migrate
+
+        new_key = hash_to_new_key.get(old_hash, "")
+        if not new_key:
+            continue  # no match or ambiguous hash collision
+
+        if new_key in existing_hashes:
+            continue  # new name already has its own cache, don't overwrite
+
+        old_md = modules_dir / f"{old_key}.md"
+        new_md = modules_dir / f"{new_key}.md"
+        if old_md.exists() and not new_md.exists():
+            old_md.rename(new_md)
+            cache.write_module_hash(codesense_dir, new_key, old_hash)
+            # old_key entry is left for _prune_stale_modules to delete
 
 
 async def submit_project_map(project_root: Path, response: str) -> str:
@@ -329,27 +457,31 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
-    roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
-    all_file_paths_l1 = [
-        p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
-    ]
-    dir_deps_l1 = _filter_dir_deps(dir_deps, roots)
-    dir_syms_l1 = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
-    valid_dirs: set[str] = (
-        set(dir_deps_l1.keys())
-        | set(dir_syms_l1.keys())
-        | _leaf_dirs_from_files(all_file_paths_l1)
-    )
-
-    warnings: list[str] = []
-    modules_json = _parse_modules_text(response, valid_dirs, warnings=warnings)
-    if not modules_json:
-        raise InvalidArgumentError(
-            "解析失败：无法从响应中提取有效模块。"
-            "请确保每行格式为「模块名|职责|目录」，不含多余内容。"
+        roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
+        all_file_paths_l1 = [
+            p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
+        ]
+        dir_deps_l1 = _filter_dir_deps(dir_deps, roots)
+        dir_syms_l1 = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+        valid_dirs: set[str] = (
+            set(dir_deps_l1.keys())
+            | set(dir_syms_l1.keys())
+            | _leaf_dirs_from_files(all_file_paths_l1)
         )
 
-    expanded = _expand_module_files(modules_json, all_file_paths_l1)
+        warnings: list[str] = []
+        modules_json = _parse_modules_text(response, valid_dirs, warnings=warnings)
+        if not modules_json:
+            raise InvalidArgumentError(
+                "解析失败：无法从响应中提取有效模块。"
+                "请确保每行格式为「模块名|职责|目录」，不含多余内容。"
+            )
+
+        expanded = _expand_module_files(modules_json, all_file_paths_l1)
+
+        # Migrate renamed modules before pruning stale entries
+        _migrate_renamed_module_caches(codesense_dir, expanded, db)
+
     cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
     markdown = _render_project_map_markdown(expanded, dir_deps_l1, aux_dirs=aux_dirs)
     cache.write_project_map(codesense_dir, markdown, current_hash)
@@ -402,15 +534,19 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
         )
         files_raw = entry.get("files")
         module_file_set = {str(f) for f in (files_raw if isinstance(files_raw, list) else [])}
-        file_symbols: dict[str, list[str]] = {}
+        # Structured symbol data: {fp: [{id, name, kind, sig}]}
+        file_symbols: dict[str, list[dict[str, str]]] = {}
+        # Nodes per file for docstring extraction
+        file_nodes: dict[str, list] = {}
         for node in db.iter_nodes(kinds=("function", "class", "method")):
             fp = node.file_path.replace("\\", "/")
             if fp not in module_file_set:
                 continue
             sig = node.signature or node.name
             file_symbols.setdefault(fp, []).append(
-                f"- `{node.name}` ({node.kind}): {sig}"
+                {"id": node.id, "name": node.name, "kind": node.kind, "sig": sig}
             )
+            file_nodes.setdefault(fp, []).append(node)
         public_api_all = cross_dir_public_api(db)
         ext_by_dir_all = external_dependencies_by_dir(edges_all, modules_data)
 
@@ -431,12 +567,33 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
     for d in directories:
         ext_deps.update(ext_by_dir_all.get(d, []))
 
+    # Extract file and symbol docstrings
+    file_docstrings: dict[str, str] = {}
+    symbol_docstrings: dict[str, str] = {}
+    if _docstrings_enabled():
+        pr = Path(project_root)
+        for fp, nodes_list in file_nodes.items():
+            lang = nodes_list[0].language if nodes_list else _lang_from_path(fp)
+            doc = extract_file_docstring(pr / fp, lang)
+            if doc:
+                file_docstrings[fp] = doc
+            symbol_docstrings.update(extract_symbol_docstrings(pr / fp, lang, nodes_list))
+        # Files with no symbols also need file docstring
+        for fp in sorted(module_file_set):
+            if fp not in file_docstrings and fp not in file_nodes:
+                lang = _lang_from_path(fp)
+                doc = extract_file_docstring(pr / fp, lang)
+                if doc:
+                    file_docstrings[fp] = doc
+
     return _build_module_prompt(
         entry,
         dir_deps,
         file_symbols,
         public_symbols=pub_syms,
         external_deps=sorted(ext_deps),
+        file_docstrings=file_docstrings,
+        symbol_docstrings=symbol_docstrings,
     )
 
 
@@ -719,25 +876,24 @@ def _build_project_map_prompt(
     layers: list[list[str]] | None = None,
     cycles: list[list[str]] | None = None,
     ext_by_dir: dict[str, list[str]] | None = None,
+    dir_file_docstrings: dict[str, str] | None = None,
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
     all_dirs_set = set(all_dirs)
     n_dirs = len(all_dirs)
     roots_str = "、".join(f"`{r}`" for r in roots)
 
-    # ---- directory section: symbol count + centrality + external deps -------
+    # ---- directory section --------------------------------------------------
     dir_lines: list[str] = []
     for d in all_dirs:
         syms = dir_syms.get(d, [])
         sym_names = ", ".join(s["name"] for s in syms)
 
-        # (←fan_in →fan_out) centrality annotation
         cent_str = ""
         if centrality and d in centrality:
             c = centrality[d]
             cent_str = f"  (←{c.fan_in} →{c.fan_out})"
 
-        # external deps annotation (up to 5 to stay compact)
         ext_str = ""
         if ext_by_dir and d in ext_by_dir:
             deps = ext_by_dir[d]
@@ -747,7 +903,13 @@ def _build_project_map_prompt(
                     ext_str += f" …+{len(deps) - 5}"
 
         sym_part = f"  [{sym_names}]" if sym_names else ""
-        dir_lines.append(f"- `{d}`: {len(syms)} 个符号{cent_str}{ext_str}{sym_part}")
+        line = f"- `{d}`: {len(syms)} 个符号{cent_str}{ext_str}{sym_part}"
+
+        fdoc = dir_file_docstrings.get(d, "") if dir_file_docstrings else ""
+        if fdoc:
+            line += f"\n  > {fdoc}"
+
+        dir_lines.append(line)
     dir_section = "\n".join(dir_lines) if dir_lines else "（无目录数据）"
 
     # ---- architecture layers section ----------------------------------------
@@ -843,10 +1005,12 @@ def _build_project_map_prompt(
 def _build_module_prompt(
     entry: dict[str, object],
     dir_deps: dict[str, dict[str, list[str]]],
-    file_symbols: dict[str, list[str]],
+    file_symbols: dict[str, list[dict[str, str]]],
     *,
     public_symbols: list[str] | None = None,
     external_deps: list[str] | None = None,
+    file_docstrings: dict[str, str] | None = None,
+    symbol_docstrings: dict[str, str] | None = None,
 ) -> str:
     name = str(entry.get("name", ""))
     description = str(entry.get("description", ""))
@@ -872,33 +1036,65 @@ def _build_module_prompt(
             if tgt in module_dirs and src_dir not in module_dirs:
                 inbound.add(src_dir)
 
-    # Build per-file symbol section
+    # Build per-file symbol section (structured data + docstrings)
     sym_lines: list[str] = []
     for fp in sorted(files):
-        syms = file_symbols.get(fp, [])
-        sym_lines.append(f"\n**`{fp}`**")
-        if syms:
-            sym_lines.extend(syms)
+        sym_list = file_symbols.get(fp, [])
+        fdoc = (file_docstrings or {}).get(fp, "")
+        header = f"\n**`{fp}`**"
+        if fdoc:
+            header += f"  — [文件注释] {fdoc}"
+        sym_lines.append(header)
+        if sym_list:
+            for sym in sym_list:
+                line = f"- `{sym['name']}` ({sym['kind']}): {sym['sig']}"
+                sdoc = (symbol_docstrings or {}).get(sym["id"], "")
+                if sdoc:
+                    line += f"\n  > [docstring] {sdoc}"
+                elif _is_generic_name(sym["name"]):
+                    line += "\n  ⚠️ 无 docstring 且名称通用，建议 read_file 确认实现语义"
+                sym_lines.append(line)
         else:
             sym_lines.append("  （无符号）")
     symbols_txt = "\n".join(sym_lines) if sym_lines else "（无符号数据）"
 
-    files_txt = "\n".join(f"- `{f}`" for f in sorted(files)) or "（无）"
+    # Build file list with inline docstrings
+    file_lines: list[str] = []
+    for f in sorted(files):
+        fdoc = (file_docstrings or {}).get(f, "")
+        file_lines.append(f"- `{f}`" + (f"  — [文件注释] {fdoc}" if fdoc else ""))
+    files_txt = "\n".join(file_lines) or "（无）"
+
     outbound_txt = "\n".join(f"- `{d}`" for d in sorted(outbound)) or "（无）"
     inbound_txt = "\n".join(f"- `{d}`" for d in sorted(inbound)) or "（无）"
 
     # Graph-derived public API (cross-directory imports, language-agnostic)
-    pub_api_txt = (
-        "\n".join(f"- `{s}`" for s in public_symbols)
-        if public_symbols
-        else "（暂无外部调用记录——该模块可能为纯内部实现）"
-    )
+    if public_symbols:
+        pub_api_txt = "\n".join(f"- `{s}`" for s in public_symbols)
+    elif _looks_like_entry_layer(directories):
+        pub_api_txt = (
+            "（未检测到项目内部 import——目录名称暗示此模块为入口/服务层。\n"
+            "对外接口由外部协议（MCP/CLI/HTTP/RPC）定义，不在图推导范围内；\n"
+            "建议查阅协议文档或通过 `read_file` 确认实际接口契约）"
+        )
+    else:
+        pub_api_txt = "（暂无外部调用记录——该模块可能为纯内部实现）"
 
     # External library dependencies
     ext_deps_txt = (
         "\n".join(f"- `{d}`" for d in external_deps)
         if external_deps
         else "（无）"
+    )
+
+    _DATA_TRUST_NOTICE = (
+        "\n---\n\n"
+        "**数据可信度说明**\n\n"
+        "以上信息由静态图分析（CodeGraph）与源码文本提取生成，存在以下已知局限：\n"
+        "- `[文件注释]` / `[docstring]` 标注内容反映**写作时的设计意图**，与最新实现可能存在偏差；\n"
+        "- 函数签名不显示副作用（I/O、全局状态、异常路径）；\n"
+        "- 图推导对外接口仅统计项目内部 import，不覆盖外部调用方（MCP/CLI/HTTP）；\n"
+        "- 标注 ⚠️ 的符号，建议调用 `read_file` 核实实现细节。\n"
     )
 
     return (
@@ -923,4 +1119,5 @@ def _build_module_prompt(
         f"### 模块内符号（函数/类/方法，含签名）\n{symbols_txt}\n\n"
         f"### 上游依赖（该模块依赖的目录）\n{outbound_txt}\n\n"
         f"### 下游依赖（依赖该模块的目录）\n{inbound_txt}\n"
+        f"{_DATA_TRUST_NOTICE}"
     )

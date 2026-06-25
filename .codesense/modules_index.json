@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-25T04:45:48.770457+00:00",
+  "generated_at": "2026-06-25T06:33:20.692454+00:00",
   "modules": [
     {
-      "name": "核心基础",
-      "description": "提供版本号与工具领域异常基类",
+      "name": "异常定义",
+      "description": "定义工具领域异常基类与具体错误类型",
       "directories": [
         "src/codesense_v1"
       ],
@@ -14,7 +14,7 @@
     },
     {
       "name": "缓存层",
-      "description": "管理 .codesense 缓存文件的读写与失效校验",
+      "description": "管理 .codesense 缓存文件的读写与失效",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -25,7 +25,7 @@
     },
     {
       "name": "数据层",
-      "description": "封装 CodeGraph SQLite 只读查询与模块目录依赖聚合及架构特征计算",
+      "description": "封装 CodeGraph DB 查询与目录依赖聚合",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -34,13 +34,14 @@
         "src/codesense_v1/data/aggregate.py",
         "src/codesense_v1/data/architecture.py",
         "src/codesense_v1/data/db.py",
+        "src/codesense_v1/data/docstrings.py",
         "src/codesense_v1/data/files.py",
         "src/codesense_v1/data/modules.py"
       ]
     },
     {
       "name": "工具注册",
-      "description": "提供 MCP 工具注册装饰器与 JSON Schema 校验分发",
+      "description": "注册并分发 MCP 工具调用",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -50,8 +51,19 @@
       ]
     },
     {
-      "name": "服务器入口",
-      "description": "构建 MCP stdio 服务器并加载工具注册",
+      "name": "摘要生成",
+      "description": "协调数据层与缓存层生成 Markdown 摘要",
+      "directories": [
+        "src/codesense_v1/summarizer"
+      ],
+      "files": [
+        "src/codesense_v1/summarizer/__init__.py",
+        "src/codesense_v1/summarizer/summarizer.py"
+      ]
+    },
+    {
+      "name": "MCP 服务",
+      "description": "构建并运行 MCP stdio 服务入口",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -62,19 +74,8 @@
       ]
     },
     {
-      "name": "摘要生成",
-      "description": "协调数据层与缓存生成架构 Markdown 摘要及分析提示词",
-      "directories": [
-        "src/codesense_v1/summarizer"
-      ],
-      "files": [
-        "src/codesense_v1/summarizer/__init__.py",
-        "src/codesense_v1/summarizer/summarizer.py"
-      ]
-    },
-    {
-      "name": "工具实现",
-      "description": "实现六个 MCP 工具并注册到 registry",
+      "name": "MCP 工具",
+      "description": "暴露 project_map 与 explore_module 等 MCP 工具",
       "directories": [
         "src/codesense_v1/tools"
       ],
@@ -92,7 +93,7 @@
   "auxiliary_dirs": [
     {
       "name": "tests",
-      "file_count": 11,
+      "file_count": 12,
       "category": "测试代码"
     },
     {

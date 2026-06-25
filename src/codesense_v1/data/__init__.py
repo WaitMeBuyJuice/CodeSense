@@ -12,6 +12,11 @@ from codesense_v1.data.architecture import (
     topological_layers,
 )
 from codesense_v1.data.db import CodeGraphDB
+from codesense_v1.data.docstrings import (
+    extract_file_docstring,
+    extract_symbol_docstrings,
+    is_enabled as docstrings_enabled,
+)
 from codesense_v1.data.files import directory_tree, list_files
 from codesense_v1.data.modules import (
     Module,
@@ -33,6 +38,9 @@ __all__ = [
     "cross_dir_public_api",
     "directory_dependencies",
     "directory_tree",
+    "docstrings_enabled",
+    "extract_file_docstring",
+    "extract_symbol_docstrings",
     "external_dependencies_by_dir",
     "find_cycles",
     "list_files",
