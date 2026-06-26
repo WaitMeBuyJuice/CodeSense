@@ -10,6 +10,7 @@ from codesense_v1 import cache
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
+from codesense_v1.summarizer import is_auto_expire_enabled
 from codesense_v1.summarizer.summarizer import _compute_module_hash
 
 _CODESENSE_DIR = ".codesense"
@@ -140,8 +141,12 @@ async def explore_module(module_name: str) -> str:
 
     cached_md = cache.read_module(codesense_dir, mkey)
     stored_hashes = cache.read_module_hashes(codesense_dir)
-    if cached_md is not None and stored_hashes.get(mkey) == current_module_hash:
-        return cached_md
+    if is_auto_expire_enabled():
+        module_cache_valid = cached_md is not None and stored_hashes.get(mkey) == current_module_hash
+    else:
+        module_cache_valid = cached_md is not None
+    if module_cache_valid:
+        return cached_md  # type: ignore[return-value]
 
     # Cache miss → guide Agent through generation workflow
     name = str(entry.get("name", module_name))

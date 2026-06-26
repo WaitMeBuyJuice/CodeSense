@@ -8,6 +8,7 @@ from typing import Final
 
 from codesense_v1 import cache
 from codesense_v1.registry import tool
+from codesense_v1.summarizer import is_auto_expire_enabled
 
 _CODESENSE_DIR = ".codesense"
 
@@ -66,7 +67,11 @@ async def project_map() -> str:
         )
 
     current_hash = cache.db_hash(db_path)
-    if cache.is_cache_valid(codesense_dir, current_hash):
+    if is_auto_expire_enabled():
+        cache_valid = cache.is_cache_valid(codesense_dir, current_hash)
+    else:
+        cache_valid = cache.read_project_map(codesense_dir) is not None
+    if cache_valid:
         cached = cache.read_project_map(codesense_dir)
         if cached is not None:
             return cached

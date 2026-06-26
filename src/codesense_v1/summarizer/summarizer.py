@@ -118,8 +118,12 @@ def _looks_like_entry_layer(directories: list[str]) -> bool:
 
 
 def _is_auto_expire_enabled() -> bool:
-    """Return True iff CODESENSE_CACHE_AUTO_EXPIRE is explicitly set to 'true' (case-insensitive)."""
-    return os.environ.get(_CACHE_AUTO_EXPIRE_ENV, "").strip().lower() == "true"
+    """Return False only when CODESENSE_CACHE_AUTO_EXPIRE is explicitly set to 'false'.
+
+    Defaults to True — cache expires when DB hash changes.
+    Set CODESENSE_CACHE_AUTO_EXPIRE=false to always serve stale cache.
+    """
+    return os.environ.get(_CACHE_AUTO_EXPIRE_ENV, "true").strip().lower() != "false"
 
 
 def _get_include_roots() -> tuple[str, ...] | None:
