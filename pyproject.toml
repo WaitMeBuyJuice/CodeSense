@@ -7,6 +7,7 @@ dependencies = [
     "jsonschema",
     "openai>=2.41.1",
     "json-repair>=0.30",
+    "pathspec>=0.12",
 ]
 
 [project.scripts]

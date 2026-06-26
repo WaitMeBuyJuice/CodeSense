@@ -139,6 +139,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "openai" },
+    { name = "pathspec" },
 ]
 
 [package.dev-dependencies]
@@ -156,6 +157,7 @@ requires-dist = [
     { name = "jsonschema" },
     { name = "mcp" },
     { name = "openai", specifier = ">=2.41.1" },
+    { name = "pathspec", specifier = ">=0.12" },
 ]
 
 [package.metadata.requires-dev]
