@@ -32,7 +32,12 @@ _CODESENSE_DIR = ".codesense"
 
 _PROJECT_MAP_INPUT_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
-    "properties": {},
+    "properties": {
+        "_nonce": {
+            "type": "string",
+            "description": "",
+        }
+    },
     "additionalProperties": False,
 }
 
@@ -70,7 +75,7 @@ def _seg_valid(codesense_dir, seg_id: str, current_hash: str, auto_expire: bool)
     ),
     input_schema=_PROJECT_MAP_INPUT_SCHEMA,
 )
-async def project_map() -> str:
+async def project_map(_nonce: str | None = None) -> str:
     project_root = await resolve_project_root()
     if project_root is None:
         return project_root_not_found_error()
