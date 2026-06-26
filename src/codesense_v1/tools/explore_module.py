@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Final
 
@@ -12,6 +11,7 @@ from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import is_auto_expire_enabled
 from codesense_v1.summarizer.summarizer import _compute_module_hash
+from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _CODESENSE_DIR = ".codesense"
 
@@ -64,11 +64,10 @@ async def explore_module(module_name: str) -> str:
             "请检查工具参数说明，补充必要参数后重新调用。"
         )
 
-    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
-    if not project_root_str:
-        raise InvalidArgumentError("参数错误：环境变量 CODESENSE_PROJECT_ROOT 未设置")
+    project_root = await resolve_project_root()
+    if project_root is None:
+        return project_root_not_found_error()
 
-    project_root = Path(project_root_str)
     codesense_dir = project_root / _CODESENSE_DIR
     db_path = project_root / ".codegraph" / "codegraph.db"
     mkey = cache.safe_key(module_name)

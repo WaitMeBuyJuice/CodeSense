@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Final
 
 from codesense_v1 import summarizer
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
+from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _SCHEMA: Final[dict[str, object]] = {
     "type": "object",
@@ -44,15 +43,15 @@ async def save_module_summary_tool(module_name: str, summary: str) -> str:
         raise InvalidArgumentError("参数错误：module_name 不能为空")
     if not summary.strip():
         raise InvalidArgumentError("参数错误：summary 不能为空")
-    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
-    if not project_root_str:
-        raise InvalidArgumentError("参数错误：环境变量 CODESENSE_PROJECT_ROOT 未设置")
+    project_root = await resolve_project_root()
+    if project_root is None:
+        return project_root_not_found_error()
     try:
-        summarizer.save_module_summary(Path(project_root_str), module_name, summary)
+        summarizer.save_module_summary(project_root, module_name, summary)
         return f"已保存模块 '{module_name}' 的摘要（{len(summary)} 字符）。"
     except FileNotFoundError:
         return (
             "# 错误\n\n"
-            f"CodeGraph 数据库不存在（项目路径：{project_root_str}）。\n\n"
+            f"CodeGraph 数据库不存在（项目路径：{project_root}）。\n\n"
             "请先在该目录下运行 `codegraph init -i`。"
         )

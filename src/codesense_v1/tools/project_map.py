@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Final
 
 from codesense_v1 import cache
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import is_auto_expire_enabled
+from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _CODESENSE_DIR = ".codesense"
 
@@ -47,15 +47,10 @@ _PROJECT_MAP_INPUT_SCHEMA: Final[dict[str, object]] = {
     input_schema=_PROJECT_MAP_INPUT_SCHEMA,
 )
 async def project_map() -> str:
-    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
-    if not project_root_str:
-        return (
-            "# 错误\n\n"
-            "环境变量 `CODESENSE_PROJECT_ROOT` 未设置。\n\n"
-            "请在 MCP 配置（`codemaker_mcp_settings.json`）的 `env` 字段中添加该变量。"
-        )
+    project_root = await resolve_project_root()
+    if project_root is None:
+        return project_root_not_found_error()
 
-    project_root = Path(project_root_str)
     codesense_dir = project_root / _CODESENSE_DIR
     db_path = project_root / ".codegraph" / "codegraph.db"
 

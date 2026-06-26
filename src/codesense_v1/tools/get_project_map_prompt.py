@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Final
 
 from codesense_v1 import summarizer
-from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
+from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _SCHEMA: Final[dict[str, object]] = {
     "type": "object",
@@ -29,14 +27,14 @@ _SCHEMA: Final[dict[str, object]] = {
     input_schema=_SCHEMA,
 )
 async def get_project_map_prompt_tool() -> str:
-    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
-    if not project_root_str:
-        raise InvalidArgumentError("参数错误：环境变量 CODESENSE_PROJECT_ROOT 未设置")
+    project_root = await resolve_project_root()
+    if project_root is None:
+        return project_root_not_found_error()
     try:
-        return await summarizer.get_project_map_prompt(Path(project_root_str))
+        return await summarizer.get_project_map_prompt(project_root)
     except FileNotFoundError:
         return (
             "# 错误\n\n"
-            f"CodeGraph 数据库不存在（项目路径：{project_root_str}）。\n\n"
+            f"CodeGraph 数据库不存在（项目路径：{project_root}）。\n\n"
             "请先在该目录下运行 `codegraph init -i`。"
         )
