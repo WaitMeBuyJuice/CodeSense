@@ -1,0 +1,10 @@
+# CodeSense ignore — 排除知识文档分析时不需要的目录/文件
+# 语法同 .gitignore
+#
+# 注意：.gitignore 中的规则已自动应用，此文件用于补充 CodeSense 专属的排除规则
+#
+# 示例：
+# docs/
+# migrations/
+# **/*.generated.py
+# scripts/

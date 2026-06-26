@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -79,7 +81,32 @@ async def run_stdio() -> None:
 
 def main() -> None:
     """同步入口：asyncio.run(run_stdio())。供 `codesense` 命令调用。"""
+    _init_codesenseignore()
     asyncio.run(run_stdio())
+
+
+def _init_codesenseignore() -> None:
+    """在 .codesense/ 下创建 .codesenseignore 模板（若不存在）。"""
+    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
+    if not project_root_str:
+        return
+    target = Path(project_root_str) / ".codesense" / ".codesenseignore"
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "# CodeSense ignore — 排除知识文档分析时不需要的目录/文件\n"
+        "# 语法同 .gitignore\n"
+        "#\n"
+        "# 注意：.gitignore 中的规则已自动应用，此文件用于补充 CodeSense 专属的排除规则\n"
+        "#\n"
+        "# 示例：\n"
+        "# docs/\n"
+        "# migrations/\n"
+        "# **/*.generated.py\n"
+        "# scripts/\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
