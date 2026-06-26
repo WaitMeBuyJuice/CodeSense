@@ -24,8 +24,17 @@ from codesense_v1.data.docstrings import (
     extract_symbol_docstrings,
     is_enabled as _docstrings_enabled,
 )
+from codesense_v1.data.files import DirectoryNode
 from codesense_v1.data.modules import list_modules, module_dependencies
+from codesense_v1.data.project_info import IdentitySource
 from codesense_v1.data.ref_docs import ref_docs_prompt_section
+from codesense_v1.data.structure import (
+    AUXILIARY_CATEGORY as _AUXILIARY_CATEGORY,
+    AUXILIARY_DIR_NAMES as _AUXILIARY_DIR_NAMES,
+    TopLevelDir,
+    auxiliary_category as _is_auxiliary_dir_cat,
+    classify_top_dirs as _classify_top_dirs_data,
+)
 from codesense_v1.errors import InvalidArgumentError
 
 _CODESENSE_DIR_NAME = ".codesense"
@@ -40,27 +49,6 @@ _INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
 _CACHE_AUTO_EXPIRE_ENV = "CODESENSE_CACHE_AUTO_EXPIRE"
 _DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
 
-# Directories that should be listed briefly in project_map but not deeply analysed.
-_AUXILIARY_DIR_NAMES: frozenset[str] = frozenset(
-    {
-        "test", "tests", "testing", "__tests__", "spec", "specs",
-        "script", "scripts",
-        "doc", "docs", "documentation", "dev-docs", "devdocs",
-        "example", "examples", "sample", "samples", "demo", "demos",
-    }
-)
-
-# Human-readable category labels for auxiliary dirs.
-_AUXILIARY_CATEGORY: dict[str, str] = {
-    "test": "测试代码", "tests": "测试代码", "testing": "测试代码",
-    "__tests__": "测试代码", "spec": "测试代码", "specs": "测试代码",
-    "script": "辅助脚本", "scripts": "辅助脚本",
-    "doc": "文档", "docs": "文档", "documentation": "文档",
-    "dev-docs": "文档", "devdocs": "文档",
-    "example": "示例代码", "examples": "示例代码",
-    "sample": "示例代码", "samples": "示例代码",
-    "demo": "示例代码", "demos": "示例代码",
-}
 
 # Regex to detect root-level filenames mistakenly treated as directories
 # (e.g. "vitest.config.mts/").
@@ -144,58 +132,22 @@ def _get_include_roots() -> tuple[str, ...] | None:
 
 
 def _is_auxiliary_dir(name: str) -> str | None:
-    """Return a category label if *name* is an auxiliary directory, else ``None``.
-
-    Matches exact names and compound names whose tokens (split by ``_`` or ``-``)
-    include a known auxiliary pattern, e.g. ``js_tests`` → tests token → "测试代码".
-    """
-    name_lower = name.lower()
-    if name_lower in _AUXILIARY_DIR_NAMES:
-        return _AUXILIARY_CATEGORY.get(name_lower, "辅助代码")
-    # Word-level match: "js_tests", "e2e-tests", "playwright-spec", etc.
-    for token in re.split(r"[_\-]", name_lower):
-        if token in _AUXILIARY_DIR_NAMES:
-            return _AUXILIARY_CATEGORY.get(token, "辅助代码")
-    return None
+    """Thin wrapper for data.structure.auxiliary_category (kept for internal use)."""
+    return _is_auxiliary_dir_cat(name)
 
 
 def _classify_top_dirs(
     all_file_paths: list[str],
 ) -> tuple[tuple[str, ...], list[dict[str, object]]]:
-    """Classify top-level directories from *all_file_paths* into L1 and L2.
-
-    Returns:
-        l1_roots: directories to include in deep module analysis.
-        aux_dirs: list of ``{"name", "file_count", "category"}`` dicts (L2).
-
-    L3 (noise) is silently dropped:
-        - directories starting with ``.``
-        - names that look like filenames (contain a file extension, e.g.
-          ``vitest.config.mts``)
-    """
-    import collections
-
-    counts: dict[str, int] = collections.Counter()
-    for fp in all_file_paths:
-        top = fp.split("/")[0] if "/" in fp else ""
-        if top:
-            counts[top] += 1
-
-    l1: list[str] = []
-    aux: list[dict[str, object]] = []
-
-    for name, cnt in sorted(counts.items(), key=lambda x: -x[1]):
-        # L3: starts with '.' or looks like a filename
-        if name.startswith(".") or _HAS_EXTENSION_RE.search(name):
-            continue
-        name_lower = name.lower()
-        category = _is_auxiliary_dir(name)
-        if category is not None:
-            aux.append({"name": name, "file_count": cnt, "category": category})
-        else:
-            l1.append(name)
-
-    return tuple(l1), aux
+    """Classify top-level dirs; returns (l1_roots, aux_dirs) for backward compatibility."""
+    dirs = _classify_top_dirs_data(all_file_paths)
+    l1 = tuple(d.name for d in dirs if not d.is_auxiliary)
+    aux: list[dict[str, object]] = [
+        {"name": d.name, "file_count": d.file_count, "category": d.category}
+        for d in dirs
+        if d.is_auxiliary
+    ]
+    return l1, aux
 
 
 def _resolve_roots_and_aux(
@@ -274,6 +226,32 @@ def _leaf_dirs_from_files(file_paths: list[str]) -> set[str]:
         for d in raw
         if not any(other != d and other.startswith(d + "/") for other in raw)
     }
+
+
+def _top_level_files_from_paths(file_paths: list[str]) -> set[str]:
+    """Return individual file paths that sit in a 'parent' directory.
+
+    When a directory (e.g. ``src/pkg``) is a parent of other directories
+    (e.g. ``src/pkg/cache``), files directly in it (e.g. ``src/pkg/errors.py``)
+    cannot be addressed via the directory approach.  This helper surfaces those
+    files so they can be used as module identifiers directly.
+    """
+    all_dirs: set[str] = {
+        fp.replace("\\", "/").rsplit("/", 1)[0]
+        for fp in file_paths
+        if "/" in fp
+    }
+    parent_dirs = {
+        d for d in all_dirs
+        if any(other != d and other.startswith(d + "/") for other in all_dirs)
+    }
+    result: set[str] = set()
+    for fp in file_paths:
+        fp_norm = fp.replace("\\", "/")
+        parent = fp_norm.rsplit("/", 1)[0] if "/" in fp_norm else ""
+        if parent in parent_dirs:
+            result.add(fp_norm)
+    return result
 
 
 def _normalize_dir(
@@ -356,21 +334,32 @@ async def get_project_map_prompt(project_root: Path) -> str:
     cycles = find_cycles(edges_internal, modules_data)
     ext_by_dir = external_dependencies_by_dir(edges_all, modules_data)
 
-    # Extract one representative file docstring per directory.
+    # Extract docstrings: one per directory (for leaf dirs) + per-file (for parent dirs).
     dir_file_docstrings: dict[str, str] = {}
+    file_docstrings: dict[str, str] = {}  # file_path → docstring
     if _docstrings_enabled():
+        all_dirs_set_check = set(dir_syms.keys())
         for d, syms in dir_syms.items():
+            is_parent = any(other.startswith(d + "/") for other in all_dirs_set_check if other != d)
             # Unique file paths in this dir, ordered by first appearance.
             seen: dict[str, None] = {}
             for s in syms:
                 fp = s["file"].replace("\\", "/")
                 seen[fp] = None
-            for fp in seen:
-                lang = file_languages.get(fp) or _lang_from_path(fp)
-                doc = extract_file_docstring(project_root / fp, lang)
-                if doc:
-                    dir_file_docstrings[d] = doc
-                    break
+            if is_parent:
+                # Collect per-file docstrings for parent dirs
+                for fp in seen:
+                    lang = file_languages.get(fp) or _lang_from_path(fp)
+                    doc = extract_file_docstring(project_root / fp, lang)
+                    if doc:
+                        file_docstrings[fp] = doc
+            else:
+                for fp in seen:
+                    lang = file_languages.get(fp) or _lang_from_path(fp)
+                    doc = extract_file_docstring(project_root / fp, lang)
+                    if doc:
+                        dir_file_docstrings[d] = doc
+                        break
 
     return _build_project_map_prompt(
         dir_deps,
@@ -381,6 +370,7 @@ async def get_project_map_prompt(project_root: Path) -> str:
         cycles=cycles,
         ext_by_dir=ext_by_dir,
         dir_file_docstrings=dir_file_docstrings,
+        file_docstrings=file_docstrings,
         ref_docs_section=ref_docs_prompt_section(project_root),
     )
 
@@ -473,6 +463,7 @@ async def submit_project_map(project_root: Path, response: str) -> str:
             set(dir_deps_l1.keys())
             | set(dir_syms_l1.keys())
             | _leaf_dirs_from_files(all_file_paths_l1)
+            | _top_level_files_from_paths(all_file_paths_l1)
         )
 
         warnings: list[str] = []
@@ -489,13 +480,39 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         _migrate_renamed_module_caches(codesense_dir, expanded, db)
 
     cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
-    markdown = _render_project_map_markdown(expanded, dir_deps_l1, aux_dirs=aux_dirs)
-    cache.write_project_map(codesense_dir, markdown, current_hash)
 
+    # Save basic 03_modules segment so project_map can render immediately.
+    # Contains module list; LLM can later enhance via
+    # get_modules_segment_prompt + save_project_map_segment("03_modules", ...).
+    from codesense_v1.data.hashes import compute_architecture_hash, compute_dependencies_hash  # avoid circular
+    module_dir_groups: list[list[str]] = [
+        m.get("directories", []) for m in expanded if isinstance(m, dict)
+    ]
+    seg03_hash = compute_architecture_hash(module_dir_groups)
+    if not cache.is_segment_valid(codesense_dir, "03_modules", seg03_hash):
+        layers_for_seg = topological_layers(edges, modules_data)
+        seg03_content = _render_basic_architecture_segment(expanded, layers_for_seg)
+        cache.write_segment(codesense_dir, "03_modules", seg03_content, seg03_hash)
+
+    # Always regenerate 04_dependencies with module name mappings now available.
+    cycles_for_04 = find_cycles(edges, modules_data)
+    seg04_content = render_dependencies_segment(expanded, edges, cycles_for_04)
+    seg04_hash = compute_dependencies_hash(edges)
+    cache.write_segment(codesense_dir, "04_dependencies", seg04_content, seg04_hash)
+
+    # Render and persist the new segment-based project_map.md.
+    cache.render_project_map(codesense_dir)
+
+    n_modules = len(expanded)
+    warning_suffix = ""
     if warnings:
-        warning_block = "\n\n---\n\n## ⚠️ 解析警告\n\n" + "\n".join(f"- {w}" for w in warnings)
-        return markdown + warning_block
-    return markdown
+        warning_suffix = "\n\n⚠️ 解析警告：\n" + "\n".join(f"- {w}" for w in warnings)
+
+    return (
+        f"模块划分已保存（{n_modules} 个模块）。"
+        "请重新调用 `project_map` 获取完整架构概览。"
+        + warning_suffix
+    )
 
 
 async def get_module_prompt(project_root: Path, module_name: str) -> str:
@@ -735,51 +752,84 @@ def _expand_module_files(
 ) -> list[dict[str, object]]:
     """Expand ``directories`` in each module entry to a concrete ``files`` list.
 
+    Entries in ``directories`` may be either directory paths or individual file
+    paths (for single-file modules like ``src/pkg/errors.py``).  File-path
+    entries are added to ``files`` directly without directory expansion.
+
     When a module claims a parent directory (e.g. ``src/core``) and another
     module explicitly claims a sub-directory (e.g. ``src/core/utils``), the
     parent module's files exclude the sub-directory's files so there is no
     overlap between modules.
     """
-    # Collect all claimed directories across all modules
-    all_claimed: set[str] = {
-        str(d).rstrip("/")
-        for m in modules_json
-        for d in (m.get("directories") or [])
-        if d
-    }
+    all_file_set = {fp.replace("\\", "/") for fp in all_file_paths}
+
+    def _is_file_entry(entry: str) -> bool:
+        """Return True if *entry* looks like a file path (has an extension)."""
+        return bool(_HAS_EXTENSION_RE.search(entry.split("/")[-1]))
+
+    # Collect all claimed directories/files across all modules
+    all_claimed_dirs: set[str] = set()
+    for m in modules_json:
+        for d in (m.get("directories") or []):
+            d_str = str(d).rstrip("/")
+            if d_str and not _is_file_entry(d_str):
+                all_claimed_dirs.add(d_str)
 
     result: list[dict[str, object]] = []
     for m in modules_json:
         dirs_raw = m.get("directories")
-        dirs: list[str] = [
+        entries: list[str] = [
             str(d).rstrip("/")
             for d in (dirs_raw if isinstance(dirs_raw, list) else [])
             if d
         ]
-        # Sub-directories that are explicitly claimed by OTHER modules
+
+        # Split entries into file refs and directory refs
+        file_refs: list[str] = []
+        dir_refs: list[str] = []
+        for e in entries:
+            if _is_file_entry(e):
+                file_refs.append(e)
+            else:
+                dir_refs.append(e)
+
+        # Sub-directories claimed by OTHER modules (exclude from dir expansion)
         excluded: set[str] = {
-            c for c in all_claimed
-            if c not in set(dirs)
-            and any(c.startswith(d + "/") for d in dirs)
+            c for c in all_claimed_dirs
+            if c not in set(dir_refs)
+            and any(c.startswith(d + "/") for d in dir_refs)
         }
+
+        # Expand directory refs to files
         matched: list[str] = []
         for fp in all_file_paths:
-            fp_norm = fp.rstrip("/")
-            for d in dirs:
+            fp_norm = fp.replace("\\", "/").rstrip("/")
+            for d in dir_refs:
                 if fp_norm == d or fp_norm.startswith(d + "/"):
-                    # Skip if this file belongs to an excluded sub-directory
                     if not any(
                         fp_norm == ex or fp_norm.startswith(ex + "/")
                         for ex in excluded
                     ):
-                        matched.append(fp)
+                        matched.append(fp_norm)
                     break
+
+        # Add direct file refs (only if they actually exist)
+        for fr in file_refs:
+            if fr in all_file_set and fr not in matched:
+                matched.append(fr)
+
+        # Determine stored directories: dir_refs + deduce parent dir for file refs
+        stored_dirs = dir_refs[:]
+        # File-ref modules: store as empty dirs list (files field is authoritative)
+        if not dir_refs and file_refs:
+            stored_dirs = []
+
         result.append(
             {
                 "name": m.get("name", ""),
                 "description": m.get("description", ""),
-                "directories": dirs,
-                "files": sorted(matched),
+                "directories": stored_dirs,
+                "files": sorted(set(matched)),
             }
         )
     return result
@@ -874,6 +924,82 @@ def _render_project_map_markdown(
 # ---------- private: prompt builders -----------------------------------------
 
 
+def _render_basic_architecture_segment(
+    modules: list[dict[str, object]],
+    layers: list[list[str]],
+) -> str:
+    """Render 03_architecture segment from module list + topo layers (no LLM)."""
+    from codesense_v1.data.structure import auxiliary_category
+
+    # Build dir/file → module name lookup for layer label resolution
+    dir_to_name: dict[str, str] = {}
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        mname = str(m.get("name", ""))
+        for d in (m.get("directories") or []):
+            dir_to_name[str(d)] = mname
+        for f in (m.get("files") or []):
+            fp = str(f).replace("\\", "/")
+            dir_to_name[fp] = mname
+            # Also map parent dir so topological layer dirs resolve correctly
+            parent = fp.rsplit("/", 1)[0] if "/" in fp else ""
+            if parent:  # never map empty string
+                dir_to_name.setdefault(parent, mname)
+
+    def _layer_label(d: str) -> str | None:
+        """Return module name for a layer dir, or None to skip it."""
+        # Skip auxiliary directories (tests, scripts, docs…)
+        top = d.split("/")[0]
+        if auxiliary_category(top) is not None:
+            return None
+        label = dir_to_name.get(d, d.split("/")[-1] if "/" in d else d)
+        return label if label else None  # skip empty strings
+
+    lines: list[str] = []
+
+    # Module list table
+    # Collect all dirs across modules to detect "parent dirs" (dirs that are
+    # prefixes of other modules' dirs → should display files instead).
+    all_module_dirs: set[str] = {
+        str(d)
+        for m in modules if isinstance(m, dict)
+        for d in (m.get("directories") or [])
+    }
+
+    def _best_path(m: dict) -> str:
+        dirs = m.get("directories") or []
+        files = m.get("files") or []
+        if not dirs:
+            # File-level module: show all files (skip __init__.py)
+            meaningful = [f for f in files if not str(f).endswith("__init__.py")]
+            return "、".join(str(f) for f in (meaningful or files))
+        # Check if any of this module's dirs is a parent of another module's dir
+        is_parent = any(
+            other != str(d) and other.startswith(str(d) + "/")
+            for d in dirs
+            for other in all_module_dirs
+        )
+        if is_parent:
+            meaningful = [f for f in files if not str(f).endswith("__init__.py")]
+            if meaningful:
+                return "、".join(str(f) for f in meaningful)
+        return "、".join(str(d) for d in dirs)
+
+    lines.append("## 模块列表\n")
+    lines.append("| 模块 | 职责 | 主要目录 |")
+    lines.append("|------|------|----------|")
+    for m in modules:
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get("name", ""))
+        desc = str(m.get("description", m.get("desc", "")))
+        path_str = _best_path(m)
+        lines.append(f"| {name} | {desc} | {path_str} |")
+
+    return "\n".join(lines)
+
+
 def _build_project_map_prompt(
     dir_deps: dict[str, dict[str, list[str]]],
     dir_syms: dict[str, list[dict[str, str]]],
@@ -884,6 +1010,7 @@ def _build_project_map_prompt(
     cycles: list[list[str]] | None = None,
     ext_by_dir: dict[str, list[str]] | None = None,
     dir_file_docstrings: dict[str, str] | None = None,
+    file_docstrings: dict[str, str] | None = None,
     ref_docs_section: str = "",
 ) -> str:
     all_dirs = sorted(set(dir_deps.keys()) | set(dir_syms.keys()))
@@ -895,7 +1022,6 @@ def _build_project_map_prompt(
     dir_lines: list[str] = []
     for d in all_dirs:
         syms = dir_syms.get(d, [])
-        sym_names = ", ".join(s["name"] for s in syms)
 
         cent_str = ""
         if centrality and d in centrality:
@@ -910,12 +1036,33 @@ def _build_project_map_prompt(
                 if len(deps) > 5:
                     ext_str += f" …+{len(deps) - 5}"
 
-        sym_part = f"  [{sym_names}]" if sym_names else ""
-        line = f"- `{d}`: {len(syms)} 个符号{cent_str}{ext_str}{sym_part}"
+        # Detect parent dirs: dirs that have child dirs in the analysis set
+        is_parent = any(other.startswith(d + "/") for other in all_dirs_set if other != d)
 
-        fdoc = dir_file_docstrings.get(d, "") if dir_file_docstrings else ""
-        if fdoc:
-            line += f"\n  > {fdoc}"
+        if is_parent and syms:
+            # Group symbols by file for per-file display
+            import collections
+            file_syms: dict[str, list[str]] = collections.defaultdict(list)
+            for sym in syms:
+                fp = sym.get("file", "").replace("\\", "/")
+                file_syms[fp].append(sym.get("name", ""))
+
+            line = f"- `{d}`（父目录，含独立文件）{cent_str}{ext_str}"
+            for fp in sorted(file_syms):
+                fname = fp.split("/")[-1]
+                sym_str = ", ".join(file_syms[fp][:8])
+                file_line = f"\n  - `{fname}`: [{sym_str}]"
+                if file_docstrings and fp in file_docstrings:
+                    file_line += f"\n    > {file_docstrings[fp]}"
+                line += file_line
+        else:
+            sym_names = ", ".join(s["name"] for s in syms)
+            sym_part = f"  [{sym_names}]" if sym_names else ""
+            line = f"- `{d}`: {len(syms)} 个符号{cent_str}{ext_str}{sym_part}"
+
+            fdoc = dir_file_docstrings.get(d, "") if dir_file_docstrings else ""
+            if fdoc:
+                line += f"\n  > {fdoc}"
 
         dir_lines.append(line)
     dir_section = "\n".join(dir_lines) if dir_lines else "（无目录数据）"
@@ -996,15 +1143,16 @@ def _build_project_map_prompt(
         + (f"## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
         + "## 输出格式\n\n"
         "每行一个模块，用竖线（|）分隔三列：\n"
-        "  模块名|一句话职责|所属目录（多目录用英文逗号分隔）\n\n"
+        "  模块名|一句话职责|所属目录或文件路径（多个用英文逗号分隔）\n\n"
         "示例行：\n"
         "  缓存层|管理 .codesense 缓存文件的读写与失效|src/codesense_v1/cache\n"
-        "  数据层|封装 CodeGraph DB 查询与模块依赖聚合|src/data,src/models\n\n"
+        "  数据层|封装 CodeGraph DB 查询与模块依赖聚合|src/data,src/models\n"
+        "  错误定义|统一异常层次|src/codesense_v1/errors.py\n\n"
         "规则：\n"
         "- 每个模块占一行\n"
         "- 不要输出标题行、编号、Markdown 格式或任何其他内容\n"
-        "- 目录路径为相对项目根的路径\n"
-        "- 同一目录不归属多个模块\n"
+        "- 路径为相对项目根的路径；单文件模块可直接写文件路径（如 `src/pkg/errors.py`）\n"
+        "- 同一目录/文件不归属多个模块\n"
         "- 必须覆盖所有目录\n"
         "- **禁止把所有目录归到单一模块**（这是错误划分；至少 2 个模块）\n"
         "- 模块名 2-20 个字符；不得包含重复词或与描述列粘连\n"
@@ -1132,3 +1280,287 @@ def _build_module_prompt(
         + (f"\n## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
         + f"{_DATA_TRUST_NOTICE}"
     )
+
+
+# ---------- project_map segment API -----------------------------------------
+
+
+def render_structure_segment(
+    project_root: Path,
+    top_dirs: list[TopLevelDir],
+    tree_root: DirectoryNode,
+    max_depth: int = 3,
+) -> str:
+    """Render 02_structure.md — pure program, no Agent needed.
+
+    Produces a depth-3 directory tree with auxiliary dir annotations.
+    """
+    project_name = project_root.resolve().name or project_root.resolve().parts[-1]
+    lines: list[str] = [f"## 顶层目录结构\n", f"```", f"{project_name}/"]
+
+    # Set of auxiliary top-level dir names for skip-expansion
+    aux_names = {d.name for d in top_dirs if d.is_auxiliary}
+
+    def _render_node(node: DirectoryNode, depth: int, prefix: str) -> None:
+        children = sorted(node.subdirs.values(), key=lambda n: n.name)
+        all_items: list[tuple[str, bool, DirectoryNode | None]] = []
+        for c in children:
+            all_items.append((c.name, True, c))
+        for f in sorted(node.files, key=lambda f: f.path):
+            all_items.append((f.path.replace("\\", "/").split("/")[-1], False, None))
+
+        for i, (name, is_dir, child) in enumerate(all_items):
+            is_last = i == len(all_items) - 1
+            connector = "└── " if is_last else "├── "
+            ext_prefix = "    " if is_last else "│   "
+
+            if is_dir:
+                td = next((d for d in top_dirs if d.name == name), None)
+                annotation = f"  [{td.category}]" if td and td.category else ""
+                lines.append(f"{prefix}{connector}{name}/{annotation}")
+                # Don't expand auxiliary dirs (already summarised below)
+                if depth < max_depth and child and name not in aux_names:
+                    _render_node(child, depth + 1, prefix + ext_prefix)
+            else:
+                lines.append(f"{prefix}{connector}{name}")
+
+    _render_node(tree_root, depth=1, prefix="")
+    lines.append("```")
+
+    # Add auxiliary dirs summary
+    aux = [d for d in top_dirs if d.is_auxiliary]
+    if aux:
+        lines.append("\n**辅助目录**\n")
+        for d in sorted(aux, key=lambda x: x.name):
+            lines.append(f"- `{d.name}/` — {d.category}（{d.file_count} 个文件）")
+
+    return "\n".join(lines)
+
+
+def render_dependencies_segment(
+    modules: list[dict[str, object]],
+    edges: list,  # list[ModuleEdge]
+    cycles: list[list[str]],
+    centrality: dict[str, object] | None = None,
+) -> str:
+    """Render 04_dependencies.md — pure program, no Agent needed."""
+    from codesense_v1.data.structure import auxiliary_category
+
+    # Build lookup: path (dir or file) → module name
+    dir_to_name: dict[str, str] = {}
+    for m in modules:
+        mname = str(m.get("name", ""))
+        for d in (m.get("directories") or []):
+            dir_to_name[str(d)] = mname
+        for f in (m.get("files") or []):
+            fp = str(f).replace("\\", "/")
+            dir_to_name[fp] = mname
+            parent = fp.rsplit("/", 1)[0] if "/" in fp else ""
+            if parent:
+                dir_to_name.setdefault(parent, mname)
+
+    # Compute common prefix to strip when no module names available
+    all_dirs_in_edges: list[str] = []
+    for e in edges:
+        if not getattr(e, "is_external", False):
+            src = e.source.replace("\\", "/")
+            tgt = e.target.replace("\\", "/")
+            all_dirs_in_edges.append(src.rsplit("/", 1)[0] if "/" in src else src)
+            all_dirs_in_edges.append(tgt.rsplit("/", 1)[0] if "/" in tgt else tgt)
+
+    def _strip_prefix(path: str) -> str:
+        """Remove the longest common prefix from a path for display."""
+        if not all_dirs_in_edges:
+            return path
+        import os
+        common = os.path.commonprefix(all_dirs_in_edges).replace("\\", "/").rstrip("/")
+        if common and path.startswith(common + "/"):
+            return path[len(common) + 1:]
+        if path == common:
+            # Path IS the prefix itself — use last segment
+            return path.split("/")[-1]
+        return path
+
+    def _dir_to_label(file_path: str) -> str | None:
+        """Return module name (or shortened path) for a file edge endpoint.
+        Returns None if the path should be filtered out (auxiliary directory).
+        """
+        fp = file_path.replace("\\", "/")
+        top = fp.split("/")[0]
+        if auxiliary_category(top) is not None:
+            return None
+
+        d = fp.rsplit("/", 1)[0] if "/" in fp else fp
+
+        # Check direct file match first
+        if fp in dir_to_name:
+            return dir_to_name[fp]
+        # Then check directory match
+        if d in dir_to_name:
+            return dir_to_name[d]
+        # No module name → use stripped path
+        return _strip_prefix(d) if dir_to_name else _strip_prefix(d)
+
+    # Aggregate edges
+    edge_set: set[tuple[str, str]] = set()
+    upstream: dict[str, set[str]] = {}
+    downstream: dict[str, set[str]] = {}
+    for e in edges:
+        if getattr(e, "is_external", False):
+            continue
+        src_label = _dir_to_label(e.source.replace("\\", "/"))
+        tgt_label = _dir_to_label(e.target.replace("\\", "/"))
+        if src_label is None or tgt_label is None:
+            continue
+        if src_label == tgt_label:
+            continue
+        edge_set.add((src_label, tgt_label))
+        downstream.setdefault(src_label, set()).add(tgt_label)
+        upstream.setdefault(tgt_label, set()).add(src_label)
+
+    lines: list[str] = ["## 依赖关系图\n", "```"]
+    for src, tgt in sorted(edge_set):
+        lines.append(f"{src} ──→ {tgt}")
+    if not edge_set:
+        lines.append("（无依赖关系数据）")
+    lines.append("```")
+
+    # Table: use module names if available, else all unique labels from edges
+    if modules:
+        all_names = sorted({str(m.get("name", "")) for m in modules if isinstance(m, dict)})
+    else:
+        all_names = sorted({label for pair in edge_set for label in pair})
+
+    if all_names:
+        lines.append("\n## 上下游详表\n")
+        lines.append("| 模块 | 上游（依赖于我） | 下游（我依赖） |")
+        lines.append("|------|----------------|--------------|")
+        for name in all_names:
+            up = "、".join(sorted(upstream.get(name, set()))) or "无"
+            down = "、".join(sorted(downstream.get(name, set()))) or "无"
+            lines.append(f"| {name} | {up} | {down} |")
+
+    if cycles:
+        lines.append("\n## ⚠️ 循环依赖\n")
+        for cycle in cycles:
+            lines.append(f"- {' → '.join(cycle)} → {cycle[0]}")
+    else:
+        lines.append("\n> 无循环依赖。")
+
+    return "\n".join(lines)
+
+
+def get_identity_segment_prompt(
+    sources: list[IdentitySource],
+    tech_hints: dict[str, str],
+) -> str:
+    """Return LLM prompt for generating 01_identity.md."""
+    sources_text = "\n\n".join(
+        f"### [{s.kind}] {s.path}\n```\n{s.content[:3000]}\n```"
+        for s in sources
+    ) or "（无可用项目文档，请根据后续模块数据推断）"
+
+    hints_text = "\n".join(f"- {k}: {v}" for k, v in tech_hints.items()) or "（未检测到配置文件）"
+
+    return (
+        "# 项目身份信息生成\n\n"
+        "你是一位软件架构师，请根据以下资料生成项目的**仓库定位**和**技术栈**描述。\n\n"
+        "## 输出格式（严格按此 Markdown 结构）\n\n"
+        "```markdown\n"
+        "## 仓库定位\n\n"
+        "<一句话总结项目>\n\n"
+        "<2-3 段：项目解决什么问题、目标用户、核心价值>\n\n"
+        "## 技术栈\n\n"
+        "| 类别 | 内容 |\n"
+        "|------|------|\n"
+        "| 主语言 | ... |\n"
+        "| 核心框架 | ... |\n"
+        "| 关键依赖 | ... |\n"
+        "| 构建工具 | ... |\n"
+        "```\n\n"
+        "## 参考资料\n\n"
+        "### 自动检测到的技术栈线索\n"
+        f"{hints_text}\n\n"
+        "### 项目文档\n\n"
+        f"{sources_text}\n\n"
+        "**注意**：如无足够信息，请如实标注「信息不足，以下为推断」，不要捏造。"
+    )
+
+
+def get_architecture_segment_prompt(
+    layers: list[list[str]],
+    modules: list[dict[str, object]],
+    dir_deps: dict[str, dict[str, list[str]]],
+    dir_syms: dict[str, list[dict[str, str]]],
+) -> str:
+    """Return LLM prompt for generating 03_architecture.md."""
+    # Layer description
+    layer_lines: list[str] = []
+    for i, layer in enumerate(layers):
+        if i == 0:
+            label = "第 0 层（基础层）"
+        elif i == len(layers) - 1:
+            label = f"第 {i} 层（入口层）"
+        else:
+            label = f"第 {i} 层（中间层）"
+        dir_labels = ", ".join("`" + d + "`" for d in sorted(layer))
+        layer_lines.append("- " + label + "：" + dir_labels)
+    layer_text = "\n".join(layer_lines) or "（无层次数据）"
+
+    # Module list text
+    module_lines: list[str] = []
+    for m in modules:
+        name = m.get("name", "")
+        raw_dirs = m.get("dirs", [m.get("dir", "")])
+        dirs_str = ", ".join(str(d) for d in raw_dirs)
+        module_lines.append(f"- `{name}` → 目录：{dirs_str}")
+    modules_text = "\n".join(module_lines) or "（无模块数据）"
+
+    return (
+        "# 架构分析与模块列表生成\n\n"
+        "你是一位软件架构师，请根据以下数据生成项目的**系统分层图**和**模块列表**。\n\n"
+        "## 输出格式（严格按此 Markdown 结构）\n\n"
+        "```markdown\n"
+        "## 系统分层\n\n"
+        "```\n"
+        "（参考下方数据画 ASCII 框图：箱式分层 + 箭头 + 层次标注 + 关键交互说明）\n"
+        "```\n\n"
+        "## 层次职责\n\n"
+        "| 层次 | 模块 | 职责 |\n"
+        "|------|------|------|\n"
+        "| 传输层 | ... | ... |\n\n"
+        "## 核心数据流\n\n"
+        "```\n"
+        "（简洁描述请求从入口到数据存储的主要路径）\n"
+        "```\n\n"
+        "## 模块列表\n\n"
+        "| 模块 | 职责 | 主要目录 |\n"
+        "|------|------|----------|\n"
+        "| ... | ... | ... |\n"
+        "```\n\n"
+        "## 拓扑分层数据\n\n"
+        f"{layer_text}\n\n"
+        "## 模块划分\n\n"
+        f"{modules_text}\n\n"
+        "**注意**：\n"
+        "- 层名须从代码职责推断（不要直接用「第0层」），参考箱式分层风格\n"
+        "- 模块列表直接使用上方「模块划分」的模块名，不要自行命名\n"
+        "- ASCII 图风格参考 `_architecture.md` 中的风格（带边框 + 职责标注）"
+    )
+
+
+def save_project_map_segment(
+    project_root: Path,
+    segment_id: str,
+    content: str,
+    source_hash: str,
+) -> None:
+    """Save a project_map segment to cache.
+
+    Args:
+        segment_id: One of "01_identity", "02_structure", "03_modules", "04_dependencies"
+        content: Markdown content of the segment
+        source_hash: Hash of the data sources used to generate this segment
+    """
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+    cache.write_segment(codesense_dir, segment_id, content, source_hash)

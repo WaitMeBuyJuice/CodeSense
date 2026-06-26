@@ -1,31 +1,17 @@
 {
-  "generated_at": "2026-06-25T08:01:44.927949+00:00",
+  "generated_at": "2026-06-26T13:55:12.860821+00:00",
   "modules": [
     {
-      "name": "异常基类",
-      "description": "定义工具领域可预期业务与校验异常基类",
-      "directories": [
-        "src/codesense_v1"
-      ],
+      "name": "错误定义",
+      "description": "统一工具与业务异常层次",
+      "directories": [],
       "files": [
-        "src/codesense_v1/__init__.py",
         "src/codesense_v1/errors.py"
       ]
     },
     {
-      "name": "缓存层",
-      "description": "管理 .codesense 缓存文件的读写与失效",
-      "directories": [
-        "src/codesense_v1/cache"
-      ],
-      "files": [
-        "src/codesense_v1/cache/__init__.py",
-        "src/codesense_v1/cache/cache.py"
-      ]
-    },
-    {
       "name": "数据层",
-      "description": "封装 CodeGraph DB 查询与目录级依赖聚合",
+      "description": "构建代码图谱(CodeGraph DB)并聚合目录/符号/依赖信息",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -36,13 +22,27 @@
         "src/codesense_v1/data/db.py",
         "src/codesense_v1/data/docstrings.py",
         "src/codesense_v1/data/files.py",
+        "src/codesense_v1/data/hashes.py",
         "src/codesense_v1/data/modules.py",
-        "src/codesense_v1/data/ref_docs.py"
+        "src/codesense_v1/data/project_info.py",
+        "src/codesense_v1/data/ref_docs.py",
+        "src/codesense_v1/data/structure.py"
+      ]
+    },
+    {
+      "name": "缓存层",
+      "description": "管理 .codesense 缓存文件读写与失效",
+      "directories": [
+        "src/codesense_v1/cache"
+      ],
+      "files": [
+        "src/codesense_v1/cache/__init__.py",
+        "src/codesense_v1/cache/cache.py"
       ]
     },
     {
       "name": "工具注册",
-      "description": "负责 MCP 工具的注册、JSON Schema 校验与分发",
+      "description": "声明工具规格并通过 jsonschema 校验与分发",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -52,8 +52,8 @@
       ]
     },
     {
-      "name": "摘要引擎",
-      "description": "协调数据层与缓存层生成模块架构 Markdown 摘要",
+      "name": "摘要生成",
+      "description": "协调数据层与缓存层生成架构/模块 Markdown 摘要",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -63,24 +63,27 @@
       ]
     },
     {
-      "name": "MCP 工具",
-      "description": "暴露 explore_module、project_map 等 MCP 工具入口",
+      "name": "工具实现",
+      "description": "MCP 工具入口实现与项目根解析",
       "directories": [
         "src/codesense_v1/tools"
       ],
       "files": [
         "src/codesense_v1/tools/__init__.py",
+        "src/codesense_v1/tools/_project_root.py",
         "src/codesense_v1/tools/explore_module.py",
+        "src/codesense_v1/tools/get_identity_segment_prompt.py",
         "src/codesense_v1/tools/get_module_prompt.py",
-        "src/codesense_v1/tools/get_project_map_prompt.py",
+        "src/codesense_v1/tools/get_modules_segment_prompt.py",
         "src/codesense_v1/tools/project_map.py",
         "src/codesense_v1/tools/save_module_summary.py",
+        "src/codesense_v1/tools/save_project_map_segment.py",
         "src/codesense_v1/tools/submit_project_map.py"
       ]
     },
     {
       "name": "服务入口",
-      "description": "构建 MCP Server 并通过 stdio 传输启动服务",
+      "description": "构建 stdio MCP 服务并加载工具",
       "directories": [
         "src/codesense_v1/server"
       ],

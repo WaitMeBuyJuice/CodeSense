@@ -3,7 +3,7 @@
 All `read_*` functions return ``None`` on any error (treat as cache miss).
 All `write_*` functions propagate ``OSError`` on genuine I/O failure.
 ``invalidate`` silently ignores missing files/dirs; clears entire cache:
-project_map, modules_index, meta, and all module files.
+project_map, modules_index, project_map.json, and all module files.
 ``db_hash`` propagates ``FileNotFoundError`` when the DB is absent.
 ``is_cache_valid`` returns ``False`` on any error.
 """
@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 _CHUNK = 65536
-_META_FILE = "meta.json"
+_META_FILE = "project_map.json"
 _PROJECT_MAP_FILE = "project_map.md"
 _MODULES_INDEX_FILE = "modules_index.json"
 _MODULES_DIR = "modules"
 _MODULE_HASHES_FILE = ".hashes.json"
+_SEGMENTS_DIR = "project_map_segments"
 
 
 def _now_iso() -> str:
@@ -44,7 +45,7 @@ def db_hash(db_path: Path) -> str:
 
 
 def is_cache_valid(codesense_dir: Path, current_hash: str) -> bool:
-    """Return ``True`` iff ``meta.json`` exists and its ``db_hash`` matches *current_hash*."""
+    """Return ``True`` iff ``project_map.json`` exists and its ``db_hash`` matches *current_hash*."""
     try:
         meta = json.loads(_meta_path(codesense_dir).read_text(encoding="utf-8"))
         return str(meta.get("db_hash", "")) == current_hash
@@ -262,6 +263,92 @@ def _clear_modules_dir(codesense_dir: Path) -> None:
             modules_dir.rmdir()
         except OSError:
             pass
+
+
+# ---------- project_map segment cache ---------------------------------------
+
+_SEGMENT_IDS: tuple[str, ...] = (
+    "01_identity",
+    "02_structure",
+    "03_modules",
+    "04_dependencies",
+)
+
+
+def _segment_dir(codesense_dir: Path) -> Path:
+    return codesense_dir / _SEGMENTS_DIR
+
+
+def _segment_md_path(codesense_dir: Path, segment_id: str) -> Path:
+    return _segment_dir(codesense_dir) / f"{segment_id}.md"
+
+
+def _segment_hash_path(codesense_dir: Path, segment_id: str) -> Path:
+    return _segment_dir(codesense_dir) / f"{segment_id}.hash"
+
+
+def read_segment(codesense_dir: Path, segment_id: str) -> str | None:
+    """Return cached segment Markdown content, or None on any error."""
+    try:
+        return _segment_md_path(codesense_dir, segment_id).read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def read_segment_hash(codesense_dir: Path, segment_id: str) -> str | None:
+    """Return stored hash for a segment, or None if absent."""
+    try:
+        return _segment_hash_path(codesense_dir, segment_id).read_text(encoding="utf-8").strip()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def is_segment_valid(codesense_dir: Path, segment_id: str, current_hash: str) -> bool:
+    """Return True iff the segment exists and its stored hash matches *current_hash*."""
+    stored = read_segment_hash(codesense_dir, segment_id)
+    return stored == current_hash and read_segment(codesense_dir, segment_id) is not None
+
+
+def write_segment(codesense_dir: Path, segment_id: str, content: str, source_hash: str) -> None:
+    """Write segment Markdown content and its source hash to disk."""
+    seg_dir = _segment_dir(codesense_dir)
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    _segment_md_path(codesense_dir, segment_id).write_text(content, encoding="utf-8")
+    _segment_hash_path(codesense_dir, segment_id).write_text(source_hash, encoding="utf-8")
+
+
+def render_project_map(codesense_dir: Path) -> str | None:
+    """Concatenate all segment Markdown files into the final project_map.md.
+
+    Returns None if any segment is missing.
+    Writes the assembled content to project_map.md and returns it.
+    """
+    parts: list[str] = []
+    for seg_id in _SEGMENT_IDS:
+        content = read_segment(codesense_dir, seg_id)
+        if content is None:
+            return None
+        parts.append(content.strip())
+
+    assembled = "\n\n---\n\n".join(parts)
+    (codesense_dir / _PROJECT_MAP_FILE).write_text(assembled, encoding="utf-8")
+    return assembled
+
+
+def invalidate_segments(codesense_dir: Path) -> None:
+    """Delete all segment files under project_map_segments/."""
+    seg_dir = _segment_dir(codesense_dir)
+    if seg_dir.is_dir():
+        for child in seg_dir.iterdir():
+            try:
+                child.unlink()
+            except OSError:
+                pass
+        try:
+            seg_dir.rmdir()
+        except OSError:
+            pass
+
 
 
 def _prune_stale_modules(codesense_dir: Path, active_keys: set[str]) -> None:

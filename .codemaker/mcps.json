@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "codemap": {
+      "args": [
+        "serve"
+      ],
+      "autoApprove": true,
+      "command": "C:\\Users\\leikaixin\\AppData\\Local\\codemap\\codemap.exe",
+      "disabled": true,
+      "env": {},
+      "timeout": 60,
+      "type": "stdio"
+    }
+  }
+}

@@ -28,10 +28,10 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-.codemap/
-.codemaker/codemap/
-.codemaker/codeindex/
-.codemaker/rules/codemap.mdc
-.codemaker/mcps.json
+# .codemap/
+# .codemaker/codemap/
+# .codemaker/codeindex/
+# .codemaker/rules/codemap.mdc
+# .codemaker/mcps.json
 .claude/skills/codemap-*/
 .claude/skills/code-index-*/

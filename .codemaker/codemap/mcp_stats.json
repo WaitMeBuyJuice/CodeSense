@@ -1,0 +1,42 @@
+{
+  "daily": {
+    "2026-06-26": [
+      {
+        "tool": "get_graph_stats",
+        "total": 1,
+        "error": 0,
+        "empty": 0
+      },
+      {
+        "tool": "find_symbol",
+        "total": 121,
+        "error": 0,
+        "empty": 17
+      },
+      {
+        "tool": "search_code",
+        "total": 24,
+        "error": 0,
+        "empty": 1
+      },
+      {
+        "tool": "get_symbol_detail",
+        "total": 36,
+        "error": 0,
+        "empty": 0
+      },
+      {
+        "tool": "get_call_chain",
+        "total": 32,
+        "error": 0,
+        "empty": 1
+      },
+      {
+        "tool": "get_dependencies",
+        "total": 3,
+        "error": 0,
+        "empty": 1
+      }
+    ]
+  }
+}

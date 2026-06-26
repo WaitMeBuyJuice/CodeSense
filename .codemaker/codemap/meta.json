@@ -1,0 +1,14 @@
+{
+  "version": "2b75e6969cfdbb2277e9c9cfadb5039c4d8c6e93",
+  "branch": "main",
+  "repo_root": "E:\\Python_Project\\CodeSense_V1",
+  "timestamp": 1782439586,
+  "file_count": 39,
+  "sym_count": 425,
+  "edge_count": 2454,
+  "large_files_skipped": 0,
+  "data_files_skipped": 0,
+  "max_file_size_kb": 512,
+  "merkle_root": "fbe15f46549012b2",
+  "vcs_type": "git"
+}
