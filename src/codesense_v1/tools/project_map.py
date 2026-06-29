@@ -14,6 +14,7 @@ from codesense_v1.data import (
     compute_tree_max_depth,
     compute_identity_hash,
     compute_structure_hash,
+    extract_tech_stack_hint,
     find_cycles,
     list_modules,
     module_dependencies,
@@ -25,6 +26,11 @@ from codesense_v1.data.hashes import _sha256
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import (
     _build_symbol_module_map,
+    get_concepts_segment_prompt,
+    get_constraints_segment_prompt,
+    get_flows_segment_prompt,
+    get_identity_segment_prompt,
+    get_project_map_prompt,
     is_auto_expire_enabled,
     render_dependencies_segment,
     render_structure_segment,
@@ -166,39 +172,70 @@ async def project_map(_nonce: str | None = None) -> str:
     need_03 = not _seg_valid(codesense_dir, "03_modules", hash_03, auto_expire)
     dep_note = "（需 03_modules 先完成）" if need_03 else ""
 
-    missing = []
+    missing: list[tuple[str, str, str | None]] = []  # (seg_id, desc, dep)
     if not _seg_valid(codesense_dir, "01_identity", hash_01, auto_expire):
-        missing.append(("01_identity", "仓库定位 + 技术栈", "get_identity_segment_prompt", None))
+        missing.append(("01_identity", "仓库定位 + 技术栈", None))
     if need_03:
-        missing.append(("03_modules", "模块列表（其他段依赖此段，请优先完成）", "get_modules_segment_prompt → submit_project_map", None))
+        missing.append(("03_modules", "模块列表（其他段依赖此段，请优先完成）", None))
     if not _seg_valid(codesense_dir, "04_constraints", hash_04, auto_expire):
-        missing.append(("04_constraints", "模块边界规则" + dep_note, "get_constraints_segment_prompt", "03_modules" if need_03 else None))
+        missing.append(("04_constraints", "模块边界规则" + dep_note, "03_modules" if need_03 else None))
     if not _seg_valid(codesense_dir, "05_flows", hash_05, auto_expire):
-        missing.append(("05_flows", "关键流程描述" + dep_note, "get_flows_segment_prompt", "03_modules" if need_03 else None))
+        missing.append(("05_flows", "关键流程描述" + dep_note, "03_modules" if need_03 else None))
     if not _seg_valid(codesense_dir, "06_concepts", hash_06, auto_expire):
-        missing.append(("06_concepts", "概念索引" + dep_note, "get_concepts_segment_prompt", "03_modules" if need_03 else None))
+        missing.append(("06_concepts", "概念索引" + dep_note, "03_modules" if need_03 else None))
 
     if not missing:
         result = cache.render_project_map(codesense_dir)
         if result:
             return result
 
-    # ---- One-shot missing list ----------------------------------------------
+    # ---- Fetch prompts for missing segments ---------------------------------
+    tech_hints = extract_tech_stack_hint(identity_sources)
+    seg_prompts: dict[str, str] = {}
+    for seg_id, _, dep in missing:
+        if dep:  # blocked by 03_modules, skip prompt fetch
+            continue
+        try:
+            if seg_id == "01_identity":
+                seg_prompts[seg_id] = get_identity_segment_prompt(identity_sources, tech_hints)
+            elif seg_id == "03_modules":
+                seg_prompts[seg_id] = await get_project_map_prompt(project_root)
+            elif seg_id == "04_constraints":
+                seg_prompts[seg_id] = await get_constraints_segment_prompt(project_root)
+            elif seg_id == "05_flows":
+                seg_prompts[seg_id] = await get_flows_segment_prompt(project_root)
+            elif seg_id == "06_concepts":
+                seg_prompts[seg_id] = await get_concepts_segment_prompt(project_root)
+        except Exception as exc:
+            seg_prompts[seg_id] = f"（提示词获取失败：{exc}）"
+
+    # ---- One-shot missing list with embedded prompts ------------------------
     steps = []
-    for i, (seg_id, desc, tool_name, dep) in enumerate(missing):
-        dep_str = f"（依赖 {dep}，请等 {dep} 完成后再做）" if dep else ""
+    for i, (seg_id, desc, dep) in enumerate(missing):
+        dep_str = f"\n\n   ⚠️ 依赖 `{dep}`，请等 `{dep}` 完成后再生成此段。" if dep else ""
+        save_call = (
+            f"`submit_project_map(response=<生成的模块划分文本>)`"
+            if seg_id == "03_modules"
+            else f"`save_project_map_segment(segment_id=\"{seg_id}\", content=<生成内容>)`"
+        )
+        prompt_section = ""
+        if seg_id in seg_prompts:
+            prompt_section = f"\n\n### 分析提示词\n\n{seg_prompts[seg_id]}"
+
         steps.append(
-            f"{i+1}. **{seg_id}**（{desc}）\n"
-            f"   → 调用 `{tool_name}` 获取提示词，生成后调用 `save_project_map_segment(segment_id=\"{seg_id}\", ...)` 保存{dep_str}"
+            f"## 步骤 {i+1}：{seg_id}（{desc}）{dep_str}\n\n"
+            f"生成后调用 {save_call} 保存。"
+            f"{prompt_section}"
         )
 
-    steps_str = "\n".join(steps)
+    steps_str = "\n\n---\n\n".join(steps)
     return (
         "# 项目概览尚未完整，需生成以下段落\n\n"
-        f"{steps_str}\n\n"
         "## 生成顺序说明\n\n"
         "- **必须先完成 `03_modules`**（其他段依赖模块划分结果）\n"
         "- `01_identity` 与 `03_modules` 可并行生成\n"
         "- `04_constraints`、`05_flows`、`06_concepts` 需在 `03_modules` 完成后执行\n\n"
-        "**全部完成后，重新调用 `project_map` 获取完整概览（共 2 次调用即可完成初始化）。**"
+        "**全部完成后，重新调用 `project_map` 获取完整概览。**\n\n"
+        "---\n\n"
+        f"{steps_str}\n"
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
-from codesense_v1 import cache
+from codesense_v1 import cache, summarizer
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
@@ -147,27 +147,32 @@ async def explore_module(module_name: str) -> str:
     if module_cache_valid:
         return cached_md  # type: ignore[return-value]
 
-    # Cache miss → guide Agent through generation workflow
+    # Cache miss → fetch prompt and embed it inline
     name = str(entry.get("name", module_name))
+    try:
+        prompt_text = await summarizer.get_module_prompt(project_root, name)
+    except Exception as exc:
+        prompt_text = f"（提示词获取失败：{exc}）"
+
     return (
-        f"# 模块「{name}」尚未生成摘要，必须按照以下内容生成摘要\n\n"
-        "请选择以下任一方式生成该模块的架构理解：\n\n"
+        f"# 模块「{name}」尚未生成摘要，必须按照以下步骤生成摘要\n\n"
         "## 方式 1：委派给子 Agent（推荐，避免污染主对话上下文）\n\n"
         "如果你的 Agent 框架支持子任务（如 `task` / `dispatch_subagent` / `Task` 工具），"
         "请创建一个子 Agent 并让它执行以下任务：\n\n"
         f"> 你是一个负责生成模块摘要的子 Agent。请按下列步骤完成任务：\n"
-        f"> 1. 调用 `get_module_prompt(module_name=\"{name}\")` 获取分析提示词\n"
-        "> 2. 阅读提示词，生成该模块的 Markdown 摘要，包含：\n"
+        f"> 1. 阅读下方「分析提示词」，生成该模块的 Markdown 摘要，包含：\n"
         ">    - 一句话描述\n"
         ">    - 对外接口（函数/类签名）\n"
         ">    - 内部文件清单及职责\n"
         ">    - 依赖关系（上游/下游模块）\n"
-        f"> 3. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
-        "> 4. 完成后回复\"已完成\"\n\n"
+        f"> 2. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
+        "> 3. 完成后回复\"已完成\"\n\n"
         f"子 Agent 完成后，主 Agent 重新调用 `explore_module(module_name=\"{name}\")` 即可获取最终摘要。\n\n"
         "## 方式 2：主 Agent 直接执行（适用于无子 Agent 能力的场景）\n\n"
-        f"1. 调用 `get_module_prompt(module_name=\"{name}\")` 获取分析提示词\n"
-        "2. 阅读提示词，生成该模块的 Markdown 摘要（包含：一句话描述、对外接口、内部文件、依赖关系）\n"
-        f"3. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
-        f"4. 重新调用 `explore_module(module_name=\"{name}\")` 获取结果\n"
+        "1. 阅读下方「分析提示词」，生成该模块的 Markdown 摘要（包含：一句话描述、对外接口、内部文件、依赖关系）\n"
+        f"2. 调用 `save_module_summary(module_name=\"{name}\", summary=<生成的摘要>)` 保存\n"
+        f"3. 重新调用 `explore_module(module_name=\"{name}\")` 获取结果\n\n"
+        "---\n\n"
+        "## 分析提示词\n\n"
+        f"{prompt_text}\n"
     )

@@ -626,6 +626,84 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
     )
 
 
+async def get_submodule_prompt(project_root: Path, module_name: str, file_path: str) -> str:
+    """Return the prompt for generating a file-level sub-module document.
+
+    Raises:
+        InvalidArgumentError: if modules_index is missing, module not found, or file not in module.
+        FileNotFoundError: if the CodeGraph DB does not exist.
+    """
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+
+    index = cache.read_modules_index(codesense_dir)
+    if index is None:
+        raise InvalidArgumentError(
+            "参数错误：尚未生成模块划分，请先调用 project_map 生成模块划分"
+        )
+    raw_modules = index.get("modules")
+    modules_list: list[dict[str, object]] = (
+        [m for m in raw_modules if isinstance(m, dict)]
+        if isinstance(raw_modules, list)
+        else []
+    )
+    norm_name = module_name.strip().lower()
+    entry: dict[str, object] | None = None
+    for m in modules_list:
+        if str(m.get("name", "")).strip().lower() == norm_name:
+            entry = m
+            break
+    if entry is None:
+        available = [str(m.get("name", "")) for m in modules_list]
+        raise InvalidArgumentError(
+            f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
+        )
+
+    if _is_single_file_module(entry):
+        name = str(entry.get("name", module_name))
+        raise InvalidArgumentError(
+            f"参数错误：模块「{name}」是单文件模块，请使用 get_module_prompt 获取该模块的分析提示词。"
+        )
+
+    files_raw = entry.get("files")
+    module_files = [str(f).replace("\\", "/") for f in (files_raw if isinstance(files_raw, list) else [])]
+    if file_path not in module_files:
+        raise InvalidArgumentError(
+            f"参数错误：文件 '{file_path}' 不在模块「{module_name}」的文件列表中。"
+            f"可用文件：{', '.join(sorted(module_files))}"
+        )
+
+    with CodeGraphDB(project_root) as db:
+        file_nodes = [
+            node
+            for node in db.iter_nodes(kinds=("function", "class", "method"))
+            if node.file_path.replace("\\", "/") == file_path
+        ]
+        node_id_to_file: dict[str, str] = {}
+        for node in db.iter_nodes():
+            node_id_to_file[node.id] = node.file_path.replace("\\", "/")
+
+        out_files_set: set[str] = set()
+        in_files_set: set[str] = set()
+        for edge in db.iter_edges(kinds=("imports", "calls")):
+            src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
+            tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+            if src_file == file_path and edge.kind == "imports":
+                out_files_set.add(tgt_file)
+            if tgt_file == file_path and edge.kind == "imports":
+                in_files_set.add(src_file)
+
+    return _build_submodule_prompt(
+        module_entry=entry,
+        file_path=file_path,
+        file_nodes=file_nodes,
+        outbound_edges=[],
+        inbound_edges=[],
+        ref_docs_section=ref_docs_prompt_section(project_root),
+        out_files=sorted(out_files_set),
+        in_files=sorted(in_files_set),
+    )
+
+
 def save_module_summary(project_root: Path, module_name: str, summary: str) -> None:
     """Write *summary* to cache for *module_name*, updating per-module hash.
 
