@@ -37,6 +37,38 @@
         "error": 0,
         "empty": 1
       }
+    ],
+    "2026-06-29": [
+      {
+        "tool": "get_graph_stats",
+        "total": 1,
+        "error": 0,
+        "empty": 0
+      },
+      {
+        "tool": "find_symbol",
+        "total": 25,
+        "error": 0,
+        "empty": 3
+      },
+      {
+        "tool": "get_call_chain",
+        "total": 20,
+        "error": 0,
+        "empty": 4
+      },
+      {
+        "tool": "get_dependencies",
+        "total": 2,
+        "error": 0,
+        "empty": 0
+      },
+      {
+        "tool": "search_code",
+        "total": 8,
+        "error": 0,
+        "empty": 0
+      }
     ]
   }
 }

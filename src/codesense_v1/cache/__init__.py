@@ -11,6 +11,8 @@ from codesense_v1.cache.cache import (
     read_project_map,
     read_segment,
     read_segment_hash,
+    read_submodule,
+    read_submodule_hashes,
     render_project_map,
     safe_key,
     write_module,
@@ -18,6 +20,8 @@ from codesense_v1.cache.cache import (
     write_modules_index,
     write_project_map,
     write_segment,
+    write_submodule,
+    write_submodule_hash,
 )
 
 __all__ = [
@@ -33,6 +37,8 @@ __all__ = [
     "read_project_map",
     "read_segment",
     "read_segment_hash",
+    "read_submodule",
+    "read_submodule_hashes",
     "render_project_map",
     "safe_key",
     "write_module",
@@ -40,4 +46,6 @@ __all__ = [
     "write_modules_index",
     "write_project_map",
     "write_segment",
+    "write_submodule",
+    "write_submodule_hash",
 ]

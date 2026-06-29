@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from codesense_v1 import cache
@@ -20,8 +21,10 @@ from codesense_v1.data import (
 )
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.files import directory_tree
+from codesense_v1.data.hashes import _sha256
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import (
+    _build_symbol_module_map,
     is_auto_expire_enabled,
     render_dependencies_segment,
     render_structure_segment,
@@ -55,6 +58,9 @@ def _seg_valid(codesense_dir, seg_id: str, current_hash: str, auto_expire: bool)
         "- 仓库定位与技术栈\n"
         "- 顶层目录结构\n"
         "- 系统分层与模块列表\n"
+        "- 模块边界规则\n"
+        "- 关键流程描述\n"
+        "- 概念索引\n"
         "- 模块间依赖关系\n\n"
         "当用户希望：\n"
         "- 理解项目整体结构或架构\n"
@@ -92,7 +98,7 @@ async def project_map(_nonce: str | None = None) -> str:
 
     auto_expire = is_auto_expire_enabled()
 
-    # ---- Gather raw data (single DB open) ------------------------------------
+    # ---- Gather data --------------------------------------------------------
     with CodeGraphDB(project_root) as db:
         modules_data = list_modules(db)
         edges_all = module_dependencies(db, include_external=True)
@@ -100,65 +106,99 @@ async def project_map(_nonce: str | None = None) -> str:
         all_file_paths = [f.path.replace("\\", "/") for f in db.iter_files()]
         tree_root = directory_tree(db)
         identity_sources = collect_identity_sources(project_root, db)
+        all_db_edges = list(db.iter_edges())
 
     top_dirs = classify_top_dirs(all_file_paths)
-    layers = topological_layers(edges_internal, modules_data)
     cycles = find_cycles(edges_internal, modules_data)
 
-    # ---- Compute segment hashes ---------------------------------------------
-    hash_01 = compute_identity_hash(identity_sources)
-    hash_02 = compute_structure_hash(top_dirs)
-    hash_04 = compute_dependencies_hash(edges_all)
-
-    # 03 hash depends on saved module-dir assignments
     modules_index = cache.read_modules_index(codesense_dir)
     saved_modules = (modules_index or {}).get("modules", [])
-    module_dir_groups: list[list[str]] = [
-        m.get("directories", []) for m in saved_modules
-        if isinstance(m, dict)
-    ]
-    hash_03 = compute_architecture_hash(module_dir_groups)
 
-    # ---- Generate 02 and 04 immediately (pure program, no Agent) ------------
+    # ---- Compute hashes -----------------------------------------------------
+    hash_01 = compute_identity_hash(identity_sources)
+    hash_02 = compute_structure_hash(top_dirs)
+
+    all_parent_dirs = {
+        fp.replace("\\", "/").rsplit("/", 1)[0]
+        for fp in all_file_paths
+        if "/" in fp.replace("\\", "/")
+    }
+    current_leaf_dirs = sorted({
+        d for d in all_parent_dirs
+        if not any(other != d and other.startswith(d + "/") for other in all_parent_dirs)
+    })
+    hash_03 = compute_architecture_hash([current_leaf_dirs])
+
+    # 04 & 07 share the same imports edge hash
+    imports_hash = compute_dependencies_hash(edges_internal)
+    hash_04 = imports_hash
+    hash_07 = imports_hash
+
+    # 05: calls edge set
+    calls_edges = sorted(
+        (e.source, e.target)
+        for e in all_db_edges
+        if getattr(e, 'kind', '') == "calls"
+    )
+    hash_05 = _sha256(json.dumps(calls_edges))
+
+    # 06: symbol-module map + module names/descriptions
+    with CodeGraphDB(project_root) as db2:
+        symbol_map = _build_symbol_module_map(saved_modules, db2)
+    concepts_data = sorted(symbol_map.items())
+    modules_desc = sorted(
+        (str(m.get("name", "")), str(m.get("description", "")))
+        for m in saved_modules if isinstance(m, dict)
+    )
+    hash_06 = _sha256(json.dumps(concepts_data + modules_desc))
+
+    # ---- Generate pure-program segments immediately -------------------------
     if not _seg_valid(codesense_dir, "02_structure", hash_02, auto_expire):
         adaptive_depth = compute_tree_max_depth(all_file_paths)
         content_02 = render_structure_segment(project_root, top_dirs, tree_root, max_depth=adaptive_depth)
         cache.write_segment(codesense_dir, "02_structure", content_02, hash_02)
 
-    if not _seg_valid(codesense_dir, "04_dependencies", hash_04, auto_expire):
-        content_04 = render_dependencies_segment(
-            saved_modules, edges_all, cycles
-        )
-        cache.write_segment(codesense_dir, "04_dependencies", content_04, hash_04)
+    if not _seg_valid(codesense_dir, "07_dependencies", hash_07, auto_expire):
+        content_07 = render_dependencies_segment(saved_modules, edges_internal, cycles)
+        cache.write_segment(codesense_dir, "07_dependencies", content_07, hash_07)
 
-    # ---- Check if 01 / 03 need Agent ----------------------------------------
-    need_01 = not _seg_valid(codesense_dir, "01_identity", hash_01, auto_expire)
+    # ---- Check what needs Agent ---------------------------------------------
     need_03 = not _seg_valid(codesense_dir, "03_modules", hash_03, auto_expire)
+    dep_note = "（需 03_modules 先完成）" if need_03 else ""
 
-    if not need_01 and not need_03:
+    missing = []
+    if not _seg_valid(codesense_dir, "01_identity", hash_01, auto_expire):
+        missing.append(("01_identity", "仓库定位 + 技术栈", "get_identity_segment_prompt", None))
+    if need_03:
+        missing.append(("03_modules", "模块列表（其他段依赖此段，请优先完成）", "get_modules_segment_prompt → submit_project_map", None))
+    if not _seg_valid(codesense_dir, "04_constraints", hash_04, auto_expire):
+        missing.append(("04_constraints", "模块边界规则" + dep_note, "get_constraints_segment_prompt", "03_modules" if need_03 else None))
+    if not _seg_valid(codesense_dir, "05_flows", hash_05, auto_expire):
+        missing.append(("05_flows", "关键流程描述" + dep_note, "get_flows_segment_prompt", "03_modules" if need_03 else None))
+    if not _seg_valid(codesense_dir, "06_concepts", hash_06, auto_expire):
+        missing.append(("06_concepts", "概念索引" + dep_note, "get_concepts_segment_prompt", "03_modules" if need_03 else None))
+
+    if not missing:
         result = cache.render_project_map(codesense_dir)
         if result:
             return result
 
-    # ---- Return Agent instructions for missing segments ---------------------
-    missing = []
-    if need_01:
-        missing.append("**01_identity**（仓库定位 + 技术栈）\n   → 调用 `get_identity_segment_prompt` 获取提示词，生成内容后调用 `save_project_map_segment(segment_id=\"01_identity\", content=...)`")
-    if need_03:
-        missing.append("**03_modules**（模块列表）\n   → 调用 `get_modules_segment_prompt` 获取提示词，按格式生成后调用 `submit_project_map(response=...)`")
+    # ---- One-shot missing list ----------------------------------------------
+    steps = []
+    for i, (seg_id, desc, tool_name, dep) in enumerate(missing):
+        dep_str = f"（依赖 {dep}，请等 {dep} 完成后再做）" if dep else ""
+        steps.append(
+            f"{i+1}. **{seg_id}**（{desc}）\n"
+            f"   → 调用 `{tool_name}` 获取提示词，生成后调用 `save_project_map_segment(segment_id=\"{seg_id}\", ...)` 保存{dep_str}"
+        )
 
-    missing_str = "\n".join(f"{i+1}. {m}" for i, m in enumerate(missing))
-
+    steps_str = "\n".join(steps)
     return (
-        "# 项目概览尚未完整生成，需要生成以下段落\n\n"
-        f"{missing_str}\n\n"
-        "# 请自己选用以下方式的一中（若没有子Agent就选用方式2）\n\n"
-        "## 方式 1：委派给子 Agent（推荐）\n\n"
-        "请创建子 Agent 执行以下任务：\n\n"
-        "> 1. 按顺序完成上方缺失段落的生成步骤\n"
-        "> 2. 每个段落生成后立即调用对应工具保存\n"
-        "> 3. 所有段落完成后回复「已完成」\n\n"
-        "子 Agent 完成后，主 Agent 重新调用 `project_map` 获取完整概览。\n\n"
-        "## 方式 2：主 Agent 直接执行\n\n"
-        "按顺序执行上方缺失段落的生成步骤，完成后重新调用 `project_map`。"
+        "# 项目概览尚未完整，需生成以下段落\n\n"
+        f"{steps_str}\n\n"
+        "## 生成顺序说明\n\n"
+        "- **必须先完成 `03_modules`**（其他段依赖模块划分结果）\n"
+        "- `01_identity` 与 `03_modules` 可并行生成\n"
+        "- `04_constraints`、`05_flows`、`06_concepts` 需在 `03_modules` 完成后执行\n\n"
+        "**全部完成后，重新调用 `project_map` 获取完整概览（共 2 次调用即可完成初始化）。**"
     )

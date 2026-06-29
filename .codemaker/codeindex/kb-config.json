@@ -1,37 +1,37 @@
 [
   {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/cache",
-    "src_path": "src/codesense_v1/cache",
-    "description": "本模块封装 .codesense/ 缓存目录的全部文件 I/O 操作"
-  },
-  {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/data",
-    "src_path": "src/codesense_v1/data",
-    "description": "数据访问与架构分析层，从 CodeGraph SQLite 索引和源码文件中提取结构化数据"
-  },
-  {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/errors",
-    "src_path": "src/codesense_v1/errors.py",
-    "description": "定义 CodeSense 的统一异常层次，区分可预期业务错误与不可预期内部错误"
-  },
-  {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/registry",
-    "src_path": "src/codesense_v1/registry",
-    "description": "提供 MCP 工具注册与调度机制，通过 @tool 装饰器声明式注册工具函数"
-  },
-  {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/server",
+    "kb_path": ".codemaker/codeindex/server",
     "src_path": "src/codesense_v1/server",
-    "description": "CodeSense MCP Server 的入口层，负责启动 stdio 传输、注册 MCP 请求处理器"
+    "description": "CodeSense_V1 的进程入口与协议桥接层：构造 mcp Server 实例，绑定 stdio 传输，把 tools/list、tools/call 协议回调委派给 registry 层。"
   },
   {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/summarizer",
-    "src_path": "src/codesense_v1/summarizer",
-    "description": "LLM Prompt 生成与摘要管理层，组装项目架构/模块详情 prompt 供 Agent 消费"
+    "kb_path": ".codemaker/codeindex/registry",
+    "src_path": "src/codesense_v1/registry",
+    "description": "工具注册与分发层：用 @tool 装饰器在 import 时注册到全局 _REGISTRY，list_tools 输出元数据，dispatch 用 jsonschema 校验参数并统一转 ToolError 为 MCP 错误响应。"
   },
   {
-    "kb_path": ".codemaker/codeindex/src/codesense_v1/tools",
+    "kb_path": ".codemaker/codeindex/tools",
     "src_path": "src/codesense_v1/tools",
-    "description": "MCP 工具适配层，6 个 tool endpoint 实现 Lazy Cache with Agent-Driven Generation 模式"
+    "description": "MCP 工具层，每个 .py 实现 1 个工具（共 8 个），通过 @tool 装饰器自注册，负责参数校验、委派 summarizer/data/cache 与缓存引导。"
+  },
+  {
+    "kb_path": ".codemaker/codeindex/summarizer",
+    "src_path": "src/codesense_v1/summarizer",
+    "description": "摘要协调层，组合 data 层结构数据产出 LLM prompt 文本、解析 Agent 返回、渲染 Markdown 段落，本身不直接调 LLM。"
+  },
+  {
+    "kb_path": ".codemaker/codeindex/data",
+    "src_path": "src/codesense_v1/data",
+    "description": "CodeGraph SQLite 知识图谱的只读查询层，把图结构加工成文件清单、模块依赖边、目录聚合、架构指标、内容指纹、项目身份信息等结构化数据。"
+  },
+  {
+    "kb_path": ".codemaker/codeindex/cache",
+    "src_path": "src/codesense_v1/cache",
+    "description": ".codesense/ 目录读写层，把 LLM 生成的架构理解（project_map 四段 + 模块摘要）持久化到磁盘，并提供基于 codegraph.db SHA-256 的失效判断。"
+  },
+  {
+    "kb_path": ".codemaker/codeindex/errors",
+    "src_path": "src/codesense_v1/errors.py",
+    "description": "错误类型体系，集中定义 ToolError 及其子类（Validation/InvalidArgument/LLMError），由 registry.dispatch 统一捕获转换为 MCP isError=true 响应。"
   }
 ]

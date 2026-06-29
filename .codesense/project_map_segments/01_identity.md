@@ -1,20 +1,19 @@
 ## 仓库定位
 
-CodeSense V1 是基于 MCP（Model Context Protocol）的代码智能分析服务，为 AI Coding Agent 提供代码库结构探索、模块摘要生成与架构分析能力。
+CodeSense V1 是一款基于 MCP（Model Context Protocol）的代码智能分析服务，为 AI 编程助手提供代码库的结构化理解能力。
 
-服务通过 stdio 传输与 MCP Client（如 Claude Desktop、VS Code）集成，Agent 可按需调用工具获取项目架构概览、模块内部细节与代码符号信息。核心价值在于为 Agent 建立对代码库的高层认知，减少长上下文中重复扫描源码的开销，并支持跨模块影响分析与依赖评估。
+项目解决的核心问题：大型代码库中，AI 助手缺乏对项目架构、模块职责、符号关系的全局认知。CodeSense V1 通过代码索引、缓存管理和结构化摘要，将代码库的架构信息以 MCP 工具形式暴露给 LLM Agent。
 
-目标用户为代码助手开发者与 AI Agent 集成方。服务以只读方式消费 CodeGraph 生成的 SQLite 索引，自身不重建代码图谱。
+目标用户为集成 MCP 客户端的 AI 编程工具（如 Cursor、VS Code Cline 等），核心价值在于让 AI 助手在回答代码问题时能快速定位模块边界、理解调用链和评估变更影响范围，无需每次都从零扫描整个代码库。
 
 ## 技术栈
 
 | 类别 | 内容 |
 |------|------|
-| 主语言 | Python ≥3.14 |
-| 核心框架 | `mcp` 库（StdioServerTransport）、`jsonschema` |
-| 关键依赖 | `openai` ≥2.41.1、`json-repair` ≥0.30、`pathspec` ≥0.12 |
-| 数据存储 | SQLite（CodeGraph 索引，只读）+ `.codesense/` 文件缓存 |
+| 主语言 | Python 3.14+ |
+| 核心框架 | MCP (mcp.server.stdio) |
+| 关键依赖 | openai (LLM 调用), json-repair (JSON 修复), pathspec (文件忽略规则), jsonschema (工具参数校验) |
 | 构建工具 | hatchling |
-| 类型检查 | mypy（strict mode） |
-| Lint | ruff（E/F/I/B/UP 规则，line-length=100） |
-| 测试框架 | pytest + pytest-asyncio（asyncio_mode=auto） |
+| 类型检查 | mypy (strict mode) |
+| 代码检查 | ruff |
+| 测试框架 | pytest + pytest-asyncio |

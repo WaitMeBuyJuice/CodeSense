@@ -271,7 +271,10 @@ _SEGMENT_IDS: tuple[str, ...] = (
     "01_identity",
     "02_structure",
     "03_modules",
-    "04_dependencies",
+    "04_constraints",
+    "05_flows",
+    "06_concepts",
+    "07_dependencies",
 )
 
 
@@ -349,6 +352,62 @@ def invalidate_segments(codesense_dir: Path) -> None:
         except OSError:
             pass
 
+
+
+# ── 子模块文档 ──────────────────────────────────────────────
+
+def submodule_dir(codesense_dir: Path, module_key: str) -> Path:
+    return codesense_dir / "modules" / module_key
+
+
+def read_submodule_hashes(codesense_dir: Path, module_key: str) -> dict[str, str]:
+    path = submodule_dir(codesense_dir, module_key) / ".hashes.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v.get("hash", "") for k, v in data.items() if isinstance(v, dict)}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def write_submodule_hash(codesense_dir: Path, module_key: str, file_key: str, submodule_hash: str) -> None:
+    hashes_path = submodule_dir(codesense_dir, module_key) / ".hashes.json"
+    hashes_path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, object] = {}
+    if hashes_path.exists():
+        try:
+            with open(hashes_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:  # noqa: BLE001
+            data = {}
+    data[file_key] = {"hash": submodule_hash, "generated_at": _now_iso()}
+    with open(hashes_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def read_submodule(codesense_dir: Path, module_key: str, file_key: str) -> str | None:
+    path = submodule_dir(codesense_dir, module_key) / f"{file_key}.md"
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def write_submodule(
+    codesense_dir: Path,
+    module_key: str,
+    file_key: str,
+    content: str,
+    submodule_hash: str,
+) -> None:
+    d = submodule_dir(codesense_dir, module_key)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{file_key}.md").write_text(content, encoding="utf-8")
+    write_submodule_hash(codesense_dir, module_key, file_key, submodule_hash)
 
 
 def _prune_stale_modules(codesense_dir: Path, active_keys: set[str]) -> None:

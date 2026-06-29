@@ -482,23 +482,28 @@ async def submit_project_map(project_root: Path, response: str) -> str:
     cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
 
     # Save basic 03_modules segment so project_map can render immediately.
-    # Contains module list; LLM can later enhance via
-    # get_modules_segment_prompt + save_project_map_segment("03_modules", ...).
     from codesense_v1.data.hashes import compute_architecture_hash, compute_dependencies_hash  # avoid circular
-    module_dir_groups: list[list[str]] = [
-        m.get("directories", []) for m in expanded if isinstance(m, dict)
-    ]
-    seg03_hash = compute_architecture_hash(module_dir_groups)
+    # Use the same leaf-dir-based hash as project_map.py (not module assignments).
+    _all_parent_dirs = {
+        fp.replace("\\", "/").rsplit("/", 1)[0]
+        for fp in all_file_paths_l1
+        if "/" in fp.replace("\\", "/")
+    }
+    _current_leaf_dirs = sorted({
+        d for d in _all_parent_dirs
+        if not any(other != d and other.startswith(d + "/") for other in _all_parent_dirs)
+    })
+    seg03_hash = compute_architecture_hash([_current_leaf_dirs])
     if not cache.is_segment_valid(codesense_dir, "03_modules", seg03_hash):
         layers_for_seg = topological_layers(edges, modules_data)
         seg03_content = _render_basic_architecture_segment(expanded, layers_for_seg)
         cache.write_segment(codesense_dir, "03_modules", seg03_content, seg03_hash)
 
-    # Always regenerate 04_dependencies with module name mappings now available.
-    cycles_for_04 = find_cycles(edges, modules_data)
-    seg04_content = render_dependencies_segment(expanded, edges, cycles_for_04)
-    seg04_hash = compute_dependencies_hash(edges)
-    cache.write_segment(codesense_dir, "04_dependencies", seg04_content, seg04_hash)
+    # Always regenerate 07_dependencies with module name mappings now available.
+    cycles_for_07 = find_cycles(edges, modules_data)
+    seg07_content = render_dependencies_segment(expanded, edges, cycles_for_07)
+    seg07_hash = compute_dependencies_hash(edges)
+    cache.write_segment(codesense_dir, "07_dependencies", seg07_content, seg07_hash)
 
     # Render and persist the new segment-based project_map.md.
     cache.render_project_map(codesense_dir)
@@ -1256,21 +1261,26 @@ def _build_module_prompt(
     )
 
     return (
-        "# 模块详细分析请求\n\n"
-        "你是一位软件架构师，请根据以下模块结构数据，生成一份**模块理解文档**。\n\n"
-        "## 要求\n\n"
-        "输出为 Markdown 格式，包含：\n"
-        "1. **概述**：该模块的核心职责（不超过 50 字）\n"
-        "2. **对外接口**：直接使用下方「对外接口（图推导）」列出的符号，"
-        "逐一说明其用途；若该列表为空，可从「模块内符号」中依据语言惯例补充推断\n"
-        "3. **内部文件**：该模块包含的文件列表，每个文件一句话说明作用\n"
-        "4. **依赖关系**：上游（该模块依赖的目录）/ 下游（依赖该模块的目录）\n"
-        "5. **外部依赖**：该模块引入的第三方或标准库（来自下方「外部依赖库」）\n\n"
-        "## 模块数据\n\n"
+        "# 模块知识文档生成请求\n\n"
+        "你是一位软件架构师，请根据以下模块结构数据，生成一份**模块知识文档**。\n\n"
+        "## 输出要求\n\n"
+        "严格输出以下 5 个 H2 章节，**不得增删章节、不得添加「对外接口」等额外章节**：\n\n"
+        "## 一句话定位\n"
+        "（10-20 字说明模块职责）\n\n"
+        "## 架构简析\n"
+        "（描述模块内部分层，如「入口→核心→辅助」，各层包含哪些文件；单文件模块简述职责即可）\n\n"
+        "## 文件清单\n"
+        "（每个文件一行：`文件名` — 一句话说明；若有 __init__.py，说明其导出的主要符号）\n\n"
+        "## 上下游关系\n"
+        "（「上游」= 依赖此模块的目录；「下游」= 此模块依赖的目录；数据来自 imports 边，置信度 extracted）\n\n"
+        "## 实现约束清单\n"
+        "（边界行为、踩坑点、禁忌；**只写模块内部约束**，跨模块架构禁忌在 project_map 04_constraints 已有，此处不重复）\n\n"
+        "---\n\n"
+        "## 模块数据（参考，不要在输出中重复这些原始数据）\n\n"
         f"### 模块名称\n{name}\n\n"
         f"### project_map 中的初步描述\n{description}\n\n"
         f"### 包含文件\n{files_txt}\n\n"
-        f"### 对外接口（图推导：被其他目录实际 import 的符号，无语言偏见）\n"
+        f"### 被其他目录 import 的公开符号（图推导，仅作参考）\n"
         f"{pub_api_txt}\n\n"
         f"### 外部依赖库（该模块直接引入的第三方/标准库）\n"
         f"{ext_deps_txt}\n\n"
@@ -1327,13 +1337,6 @@ def render_structure_segment(
     _render_node(tree_root, depth=1, prefix="")
     lines.append("```")
 
-    # Add auxiliary dirs summary
-    aux = [d for d in top_dirs if d.is_auxiliary]
-    if aux:
-        lines.append("\n**辅助目录**\n")
-        for d in sorted(aux, key=lambda x: x.name):
-            lines.append(f"- `{d.name}/` — {d.category}（{d.file_count} 个文件）")
-
     return "\n".join(lines)
 
 
@@ -1343,7 +1346,7 @@ def render_dependencies_segment(
     cycles: list[list[str]],
     centrality: dict[str, object] | None = None,
 ) -> str:
-    """Render 04_dependencies.md — pure program, no Agent needed."""
+    """Render 07_dependencies.md — pure program, no Agent needed."""
     from codesense_v1.data.structure import auxiliary_category
 
     # Build lookup: path (dir or file) → module name
@@ -1418,12 +1421,7 @@ def render_dependencies_segment(
         downstream.setdefault(src_label, set()).add(tgt_label)
         upstream.setdefault(tgt_label, set()).add(src_label)
 
-    lines: list[str] = ["## 依赖关系图\n", "```"]
-    for src, tgt in sorted(edge_set):
-        lines.append(f"{src} ──→ {tgt}")
-    if not edge_set:
-        lines.append("（无依赖关系数据）")
-    lines.append("```")
+    lines: list[str] = []
 
     # Table: use module names if available, else all unique labels from edges
     if modules:
@@ -1448,6 +1446,171 @@ def render_dependencies_segment(
         lines.append("\n> 无循环依赖。")
 
     return "\n".join(lines)
+
+
+# ---------- submodule helpers ------------------------------------------------
+
+
+def _compute_submodule_hash(file_path: str, db: "CodeGraphDB") -> str:
+    """Hash 单文件的 nodes 指纹 + 出边 imports 集合（基于文件路径）。"""
+    # Build node-id → file mapping for edge resolution
+    node_id_to_file: dict[str, str] = {}
+    for node in db.iter_nodes():
+        node_id_to_file[node.id] = node.file_path.replace("\\", "/")
+
+    parts: list[str] = []
+    for node in sorted(
+        db.iter_nodes(kinds=("function", "class", "method")),
+        key=lambda n: (n.name, n.kind),
+    ):
+        if node.file_path.replace("\\", "/") == file_path:
+            parts.append(f"{node.name}:{node.kind}:{node.signature or ''}")
+    for edge in sorted(
+        db.iter_edges(kinds=("imports", "calls")),
+        key=lambda e: (e.source, e.target),
+    ):
+        src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
+        if src_file == file_path and edge.kind in ("imports", "calls"):
+            tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+            parts.append(f"edge:{edge.kind}:{src_file}->{tgt_file}")
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()  # noqa: S324
+
+
+def _is_single_file_module(entry: dict) -> bool:
+    """模块下除 __init__.py 外只有 0 或 1 个 .py 文件 → 视为单文件模块。"""
+    py_files = [f for f in entry.get("files", []) if f.endswith(".py") and not f.endswith("__init__.py")]
+    return len(py_files) <= 1
+
+
+def _build_submodule_prompt(
+    module_entry: dict,
+    file_path: str,
+    file_nodes: list,
+    outbound_edges: list,
+    inbound_edges: list,
+    ref_docs_section: str = "",
+    *,
+    out_files: list[str] | None = None,
+    in_files: list[str] | None = None,
+) -> str:
+    """构造单文件子模块摘要的 LLM prompt。
+
+    outbound_edges / inbound_edges 是 EdgeRow 列表。EdgeRow.source/target 是 node id，
+    所以调用方应通过 out_files / in_files 参数直接传入已解析的文件路径列表，
+    避免依赖 edge.target 作为文件路径。
+    若 out_files / in_files 未提供，则尝试直接从 edge.target / edge.source 获取
+    （仅在 source/target 本身已是文件路径时正确）。
+    """
+    module_name = module_entry.get("name", "")
+    file_name = file_path.split("/")[-1]
+
+    public_symbols = [
+        f"- `{n.name}` ({n.kind}): {n.signature or ''}"
+        for n in file_nodes
+        if not n.name.startswith("_") and n.kind in ("function", "class", "method")
+    ]
+    all_symbols = [
+        f"- `{n.name}` ({n.kind}): {n.signature or ''}"
+        for n in file_nodes
+        if n.kind in ("function", "class", "method")
+    ]
+
+    resolved_out = (
+        sorted(out_files)
+        if out_files is not None
+        else sorted({e.target for e in outbound_edges if e.kind == "imports"})
+    )
+    resolved_in = (
+        sorted(in_files)
+        if in_files is not None
+        else sorted({e.source for e in inbound_edges if e.kind == "imports"})
+    )
+
+    lines = [
+        "# 子模块文档生成任务",
+        "",
+        f"模块：`{module_name}`  文件：`{file_name}`  路径：`{file_path}`",
+        "",
+        "## 全部符号",
+        "\n".join(all_symbols) or "（无）",
+        "",
+        "## 对外接口候选（非下划线开头）",
+        "\n".join(public_symbols) or "（无公开符号，请在输出中注明「仅供内部调用」）",
+        "",
+        "## 出向依赖文件（imports）",
+        "\n".join(f"- `{f}`" for f in resolved_out) or "（无）",
+        "",
+        "## 入向依赖文件（被哪些文件 import）",
+        "\n".join(f"- `{f}`" for f in resolved_in) or "（无）",
+    ]
+    if ref_docs_section:
+        lines += ["", "## 参考文档", ref_docs_section]
+
+    lines += [
+        "",
+        "---",
+        "",
+        "请基于以上数据生成子模块文档，格式如下（严格输出 Markdown，不要输出其他内容）：",
+        "",
+        "## 文件概述",
+        "（2-3 句话说明该文件的职责）",
+        "",
+        "## 对外接口",
+        "（列表：函数/类名 + 签名 + 一句话说明；若无公开接口则写「仅供内部调用」）",
+        "",
+        "## 跨模块依赖",
+        "（出向：该文件依赖的外部模块文件；入向：依赖该文件的外部模块文件）",
+        "",
+        "## 典型调用链",
+        "（2-3 条关键调用链，格式：`调用者` → `被调用者`；数据不足可省略）",
+    ]
+    return "\n".join(lines)
+
+
+def save_submodule_summary(project_root: Path, module_name: str, file_path: str, summary: str) -> None:
+    """保存子模块文档到 .codesense/modules/<module>/<file>.md。
+
+    Raises:
+        FileNotFoundError: if the CodeGraph DB does not exist.
+        InvalidArgumentError: if modules_index is missing or module_name not found.
+    """
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+    db_path = project_root / ".codegraph" / "codegraph.db"
+
+    index = cache.read_modules_index(codesense_dir)
+    if index is None:
+        raise InvalidArgumentError(
+            "参数错误：尚未生成模块划分，请先调用 project_map 生成模块划分"
+        )
+    raw_modules = index.get("modules")
+    modules_list: list[dict[str, object]] = (
+        [m for m in raw_modules if isinstance(m, dict)]
+        if isinstance(raw_modules, list)
+        else []
+    )
+    norm_name = module_name.strip().lower()
+    entry: dict[str, object] | None = None
+    for m in modules_list:
+        if str(m.get("name", "")).strip().lower() == norm_name:
+            entry = m
+            break
+    if entry is None:
+        available = [str(m.get("name", "")) for m in modules_list]
+        raise InvalidArgumentError(
+            f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
+        )
+
+    module_key = cache.safe_key(module_name)
+    # file_path 形如 "src/codesense_v1/cache/cache.py"，取末段去扩展名
+    file_stem = file_path.rstrip("/").split("/")[-1]
+    # Replace dots with underscores for a safe filename key
+    file_stem_safe = file_stem.replace(".", "_")
+    file_key = cache.safe_key(file_stem_safe)
+
+    with CodeGraphDB(project_root) as db:
+        submodule_hash = _compute_submodule_hash(file_path, db)
+
+    cache.write_submodule(codesense_dir, module_key, file_key, summary, submodule_hash)
 
 
 def get_identity_segment_prompt(
@@ -1558,9 +1721,238 @@ def save_project_map_segment(
     """Save a project_map segment to cache.
 
     Args:
-        segment_id: One of "01_identity", "02_structure", "03_modules", "04_dependencies"
+        segment_id: One of "01_identity", "02_structure", "03_modules", "04_constraints", "05_flows", "06_concepts", "07_dependencies"
         content: Markdown content of the segment
         source_hash: Hash of the data sources used to generate this segment
     """
     codesense_dir = project_root / _CODESENSE_DIR_NAME
     cache.write_segment(codesense_dir, segment_id, content, source_hash)
+
+
+# ---------- Entry-module heuristics for 05_flows ----------------------------
+
+_ENTRY_LAYER_KEYWORDS = frozenset({
+    "tool", "tools", "handler", "handlers",
+    "controller", "controllers", "server",
+    "main", "api", "cli", "cmd", "endpoint", "endpoints",
+    "route", "routes", "app",
+})
+
+
+def _identify_entry_modules(saved_modules: list[dict]) -> list[dict]:
+    """Identify candidate entry modules by name heuristics."""
+    candidates = []
+    for m in saved_modules:
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get("name", "")).lower()
+        dirs = [str(d).lower() for d in (m.get("directories") or m.get("files") or [])]
+        is_candidate = any(kw in name for kw in _ENTRY_LAYER_KEYWORDS) or \
+                       any(any(kw in d for kw in _ENTRY_LAYER_KEYWORDS) for d in dirs)
+        if is_candidate:
+            candidates.append(m)
+    return candidates
+
+
+# ---------- Symbol-module map for 06_concepts --------------------------------
+
+
+def _build_symbol_module_map(
+    saved_modules: list[dict],
+    db: CodeGraphDB,
+    public_kinds: tuple[str, ...] = ("function", "class", "method"),
+) -> dict[str, str]:
+    """Build {symbol_name: module_name} for all public symbols."""
+    dir_to_module: dict[str, str] = {}
+    for m in saved_modules:
+        if not isinstance(m, dict):
+            continue
+        mname = str(m.get("name", ""))
+        for d in (m.get("directories") or []):
+            dir_to_module[str(d)] = mname
+        for f in (m.get("files") or []):
+            fp = str(f).replace("\\", "/")
+            dir_to_module[fp] = mname
+            parent = fp.rsplit("/", 1)[0] if "/" in fp else ""
+            if parent:
+                dir_to_module.setdefault(parent, mname)
+
+    symbol_map: dict[str, str] = {}
+    for node in db.iter_nodes(kinds=public_kinds):
+        fp = node.file_path.replace("\\", "/")
+        parent = fp.rsplit("/", 1)[0] if "/" in fp else fp
+        module = dir_to_module.get(fp) or dir_to_module.get(parent)
+        if module and not node.name.startswith("_"):
+            symbol_map[node.name] = module
+    return symbol_map
+
+
+# ---------- New segment prompt generators ------------------------------------
+
+
+async def get_constraints_segment_prompt(project_root: Path) -> str:
+    """Return LLM prompt for generating 04_constraints."""
+    import json
+    from codesense_v1.data.hashes import _sha256  # noqa: F401 — used below for hash ref
+
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+
+    with CodeGraphDB(project_root) as db:
+        modules_data = list_modules(db)
+        edges_all = module_dependencies(db, include_external=False)
+        all_file_paths = [f.path.replace("\\", "/") for f in db.iter_files()]
+
+    modules_index = cache.read_modules_index(codesense_dir)
+    saved_modules = (modules_index or {}).get("modules", [])
+
+    dir_deps = directory_dependencies(edges_all, modules_data,
+                                      include_external=False, include_self_loops=False)
+    layers = topological_layers(edges_all, modules_data)
+    cycles = find_cycles(edges_all, modules_data)
+
+    ref_section = ref_docs_prompt_section(project_root)
+
+    modules_text = "\n".join(
+        f"- `{m.get('name')}` ({', '.join(m.get('directories', []) or m.get('files', []))}): {m.get('description', '')}"
+        for m in saved_modules if isinstance(m, dict)
+    )
+    deps_text = "\n".join(
+        f"- {src} → {', '.join(tgts.get('imports', []))}"
+        for src, tgts in dir_deps.items() if tgts.get('imports')
+    )
+    layers_text = "\n".join(
+        f"- 第{i}层: {', '.join(sorted(layer))}"
+        for i, layer in enumerate(layers)
+    )
+    cycle_text = "无循环依赖" if not cycles else "\n".join(
+        f"- 循环: {' → '.join(c)}" for c in cycles
+    )
+
+    return (
+        "# 模块边界规则生成\n\n"
+        "你是一位软件架构师。请根据以下模块结构数据，推断并总结项目的**架构规则与边界约束**。\n\n"
+        "## 输出格式（Markdown）\n\n"
+        "```markdown\n"
+        "## 模块边界规则\n\n"
+        "### 层次约束\n"
+        "- <层次结构规则，如「server → registry → tools → summarizer」单向依赖>\n\n"
+        "### 访问禁忌\n"
+        "- <哪些模块不能直接调用哪些，如「tools 层禁止直接操作 .codesense/ 目录」>\n\n"
+        "### 职责边界\n"
+        "- <每层的唯一职责，如「data 层只读，不写任何文件」>\n\n"
+        "### 新增代码约束\n"
+        "- <新增功能时必须遵守的规则>\n"
+        "```\n\n"
+        "## 模块数据\n\n"
+        f"### 模块列表\n{modules_text}\n\n"
+        f"### 模块间依赖（imports）\n{deps_text or '（无数据）'}\n\n"
+        f"### 拓扑层次\n{layers_text or '（无数据）'}\n\n"
+        f"### 循环依赖\n{cycle_text}\n\n"
+        + (f"## 参考文档\n\n{ref_section}\n" if ref_section else "")
+        + "**注意**：规则要基于数据推断，不要凭空捏造；如推断依据不足，请注明「待人工补充」。"
+    )
+
+
+async def get_flows_segment_prompt(project_root: Path) -> str:
+    """Return LLM prompt for generating 05_flows."""
+    from codesense_v1.data.aggregate import directory_symbols
+
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+
+    with CodeGraphDB(project_root) as db:
+        modules_data = list_modules(db)
+        edges_imports = [e for e in module_dependencies(db, include_external=False)
+                         if getattr(e, 'kind', '') == "imports"]
+        dir_syms = directory_symbols(db, max_per_dir=20)
+
+    modules_index = cache.read_modules_index(codesense_dir)
+    saved_modules = (modules_index or {}).get("modules", [])
+
+    candidates = _identify_entry_modules(saved_modules)
+    candidate_names = [m.get("name", "") for m in candidates]
+
+    entry_syms_text = ""
+    for m in candidates:
+        dirs = m.get("directories") or [str(f).rsplit("/", 1)[0] for f in (m.get("files") or [])]
+        syms = []
+        for d in dirs:
+            syms.extend(dir_syms.get(d, []))
+        if syms:
+            sym_str = ", ".join(s["name"] for s in syms[:10])
+            entry_syms_text += f"\n- `{m.get('name')}` 符号: [{sym_str}]"
+
+    ref_section = ref_docs_prompt_section(project_root)
+
+    return (
+        "# 关键流程描述生成\n\n"
+        "你是一位软件架构师。请根据以下数据，识别并描述项目中**最重要的跨模块端到端流程**（3-5 个）。\n\n"
+        "## 输出格式（Markdown）\n\n"
+        "```markdown\n"
+        "## 关键流程描述\n\n"
+        "### 流程名称\n"
+        "**场景**：<什么时候触发>\n"
+        "**调用链**：模块A → 模块B → 模块C\n"
+        "**关键步骤**：\n"
+        "1. <步骤1>\n"
+        "2. <步骤2>\n"
+        "3. <步骤3>\n"
+        "```\n\n"
+        "## 候选入口模块（程序启发式识别，请根据实际情况确认/修改）\n\n"
+        f"以下模块可能是流程入口：**{', '.join(candidate_names) or '（未识别到，请自行判断）'}**\n"
+        f"{entry_syms_text}\n\n"
+        "如有遗漏或误判（如项目用不同命名规范），请在流程描述中自行补充正确入口。\n\n"
+        "## 模块列表（用于理解跨模块协作）\n\n"
+        + "\n".join(
+            f"- `{m.get('name')}`: {m.get('description', '')}"
+            for m in saved_modules if isinstance(m, dict)
+        )
+        + "\n\n"
+        + (f"## 参考文档\n\n{ref_section}\n" if ref_section else "")
+        + "**要求**：每个流程必须跨越至少 2 个模块；描述要具体到函数名或数据流向，不要泛泛而谈。"
+    )
+
+
+async def get_concepts_segment_prompt(project_root: Path) -> str:
+    """Return LLM prompt for generating 06_concepts."""
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+
+    modules_index = cache.read_modules_index(codesense_dir)
+    saved_modules = (modules_index or {}).get("modules", [])
+
+    with CodeGraphDB(project_root) as db:
+        symbol_map = _build_symbol_module_map(saved_modules, db)
+
+    module_symbols: dict[str, list[str]] = {}
+    for sym, mod in symbol_map.items():
+        module_symbols.setdefault(mod, []).append(sym)
+
+    symbol_table_text = "\n".join(
+        f"- 模块 `{mod}` 公开符号: {', '.join(sorted(syms)[:15])}"
+        for mod, syms in sorted(module_symbols.items())
+    )
+
+    modules_text = "\n".join(
+        f"- `{m.get('name')}`: {m.get('description', '')}"
+        for m in saved_modules if isinstance(m, dict)
+    )
+
+    return (
+        "# 概念索引生成\n\n"
+        "你是一位软件架构师。请根据以下数据，生成项目的**概念索引**——即「用户可能会用哪些词语搜索，对应的是哪个模块/符号」。\n\n"
+        "## 输出格式（Markdown，表格形式）\n\n"
+        "```markdown\n"
+        "## 概念索引\n\n"
+        "| 关键词 / 业务概念 | 对应模块 | 核心符号 | 备注 |\n"
+        "|-----------------|---------|---------|------|\n"
+        "| 关键词（中文或英文）| 模块名 | 函数/类名 | 易混淆提示或说明 |\n"
+        "```\n\n"
+        "## 要求\n"
+        "1. 关键词要覆盖：业务操作词（如「缓存失效」「模块划分」）+ 技术词（如「segment」「prompt」）\n"
+        "2. 对同名/近义系统，必须加「备注」区分（如「submit_project_map vs save_project_map_segment 的区别」）\n"
+        "3. 至少 15 条，覆盖所有模块\n\n"
+        "## 程序提取的符号-模块映射（已完成，你只需添加关键词和备注）\n\n"
+        f"{symbol_table_text}\n\n"
+        "## 模块描述\n\n"
+        f"{modules_text}\n\n"
+        "**注意**：关键词要是用户实际可能搜索的词，不要是技术实现细节词；备注栏专门写易混淆说明。"
+    )

@@ -1,17 +1,30 @@
 {
-  "generated_at": "2026-06-26T13:55:12.860821+00:00",
+  "generated_at": "2026-06-29T04:32:37.702466+00:00",
   "modules": [
     {
       "name": "错误定义",
-      "description": "统一工具与业务异常层次",
-      "directories": [],
+      "description": "工具领域异常基类",
+      "directories": [
+        "src/codesense_v1"
+      ],
       "files": [
         "src/codesense_v1/errors.py"
       ]
     },
     {
+      "name": "缓存管理",
+      "description": ".codesense/ 目录缓存读写",
+      "directories": [
+        "src/codesense_v1/cache"
+      ],
+      "files": [
+        "src/codesense_v1/cache/__init__.py",
+        "src/codesense_v1/cache/cache.py"
+      ]
+    },
+    {
       "name": "数据层",
-      "description": "构建代码图谱(CodeGraph DB)并聚合目录/符号/依赖信息",
+      "description": "文件/符号/边的数据库层与目录级聚合",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -30,19 +43,8 @@
       ]
     },
     {
-      "name": "缓存层",
-      "description": "管理 .codesense 缓存文件读写与失效",
-      "directories": [
-        "src/codesense_v1/cache"
-      ],
-      "files": [
-        "src/codesense_v1/cache/__init__.py",
-        "src/codesense_v1/cache/cache.py"
-      ]
-    },
-    {
       "name": "工具注册",
-      "description": "声明工具规格并通过 jsonschema 校验与分发",
+      "description": "MCP 工具注册分发与 JSON Schema 校验",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -52,8 +54,20 @@
       ]
     },
     {
-      "name": "摘要生成",
-      "description": "协调数据层与缓存层生成架构/模块 Markdown 摘要",
+      "name": "服务入口",
+      "description": "MCP stdio 服务器入口",
+      "directories": [
+        "src/codesense_v1/server"
+      ],
+      "files": [
+        "src/codesense_v1/server/__init__.py",
+        "src/codesense_v1/server/__main__.py",
+        "src/codesense_v1/server/server.py"
+      ]
+    },
+    {
+      "name": "摘要协调",
+      "description": "协调数据层与缓存层生成项目映射/模块摘要",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -64,7 +78,7 @@
     },
     {
       "name": "工具实现",
-      "description": "MCP 工具入口实现与项目根解析",
+      "description": "MCP 工具实现与编排调用",
       "directories": [
         "src/codesense_v1/tools"
       ],
@@ -72,6 +86,9 @@
         "src/codesense_v1/tools/__init__.py",
         "src/codesense_v1/tools/_project_root.py",
         "src/codesense_v1/tools/explore_module.py",
+        "src/codesense_v1/tools/get_concepts_segment_prompt.py",
+        "src/codesense_v1/tools/get_constraints_segment_prompt.py",
+        "src/codesense_v1/tools/get_flows_segment_prompt.py",
         "src/codesense_v1/tools/get_identity_segment_prompt.py",
         "src/codesense_v1/tools/get_module_prompt.py",
         "src/codesense_v1/tools/get_modules_segment_prompt.py",
@@ -79,18 +96,6 @@
         "src/codesense_v1/tools/save_module_summary.py",
         "src/codesense_v1/tools/save_project_map_segment.py",
         "src/codesense_v1/tools/submit_project_map.py"
-      ]
-    },
-    {
-      "name": "服务入口",
-      "description": "构建 stdio MCP 服务并加载工具",
-      "directories": [
-        "src/codesense_v1/server"
-      ],
-      "files": [
-        "src/codesense_v1/server/__init__.py",
-        "src/codesense_v1/server/__main__.py",
-        "src/codesense_v1/server/server.py"
       ]
     }
   ],

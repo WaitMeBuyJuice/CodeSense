@@ -1,11 +1,16 @@
 ## 模块列表
 
-| 模块 | 职责 | 主要目录 |
-|------|------|----------|
-| 错误定义 | 统一工具与业务异常层次 | src/codesense_v1/errors.py |
-| 数据层 | 构建代码图谱(CodeGraph DB)并聚合目录/符号/依赖信息 | src/codesense_v1/data |
-| 缓存层 | 管理 .codesense 缓存文件读写与失效 | src/codesense_v1/cache |
-| 工具注册 | 声明工具规格并通过 jsonschema 校验与分发 | src/codesense_v1/registry |
-| 摘要生成 | 协调数据层与缓存层生成架构/模块 Markdown 摘要 | src/codesense_v1/summarizer |
-| 工具实现 | MCP 工具入口实现与项目根解析 | src/codesense_v1/tools |
-| 服务入口 | 构建 stdio MCP 服务并加载工具 | src/codesense_v1/server |
+| 模块名 | 职责 | 路径 | 架构层 |
+|--------|------|------|--------|
+| 错误定义 | 工具领域异常基类，所有业务/校验错误都继承 ToolError | `src/codesense_v1` | 第0层 |
+| 缓存管理 | .codesense/ 目录缓存读写与失效管理，提供 segment 级和模块级缓存 | `src/codesense_v1/cache` | 第0层 |
+| 数据层 | CodeGraph DB 封装：文件/符号/边的结构化存储，目录级依赖聚合与架构特征计算 | `src/codesense_v1/data` | 第0层 |
+| 工具注册 | MCP 工具声明式注册与 JSON Schema 参数校验，工具路由分发 | `src/codesense_v1/registry` | 第1层 |
+| 摘要协调 | 协调数据层与缓存层，生成项目映射/模块摘要的 Markdown 内容，纯函数式协调 | `src/codesense_v1/summarizer` | 第1层 |
+| 服务入口 | MCP stdio 服务器启动与生命周期管理，工具列表/调用的 MCP 协议处理 | `src/codesense_v1/server` | 第2层（入口）|
+| 工具实现 | MCP 工具具体实现，解析项目根路径，编排调用摘要协调/缓存管理/数据层 | `src/codesense_v1/tools` | 第2层（入口）|
+
+### 架构层级
+- **第0层（基础层）**：错误定义、缓存管理、数据层 — 被上层依赖，无内部出边，互不依赖
+- **第1层（协调层）**：工具注册、摘要协调 — 依赖第0层，被第2层依赖
+- **第2层（入口层）**：服务入口、工具实现 — 依赖第1层和第0层，不被其他模块依赖
