@@ -1160,6 +1160,8 @@ def _build_project_map_prompt(
         "- 同一目录/文件不归属多个模块\n"
         "- 必须覆盖所有目录\n"
         "- **禁止把所有目录归到单一模块**（这是错误划分；至少 2 个模块）\n"
+        "- 模块名必须使用英文（如 data / cache / registry / summarizer / tools / server / errors），"
+        "snake_case 或 lowercase 均可，**不得使用中文**\n"
         "- 模块名 2-20 个字符；不得包含重复词或与描述列粘连\n"
     )
 
@@ -1602,10 +1604,9 @@ def save_submodule_summary(project_root: Path, module_name: str, file_path: str,
 
     module_key = cache.safe_key(module_name)
     # file_path 形如 "src/codesense_v1/cache/cache.py"，取末段去扩展名
-    file_stem = file_path.rstrip("/").split("/")[-1]
-    # Replace dots with underscores for a safe filename key
-    file_stem_safe = file_stem.replace(".", "_")
-    file_key = cache.safe_key(file_stem_safe)
+    basename = file_path.rstrip("/").split("/")[-1]
+    basename_no_ext = basename.rsplit(".", 1)[0]
+    file_key = f"{module_key}_{basename_no_ext}"
 
     with CodeGraphDB(project_root) as db:
         submodule_hash = _compute_submodule_hash(file_path, db)

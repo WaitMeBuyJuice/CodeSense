@@ -59,10 +59,11 @@ async def save_submodule_summary_tool(module_name: str, file_path: str, summary:
 
     try:
         summarizer.save_submodule_summary(project_root, module_name, file_path, summary)
-        file_stem = file_path.split("/")[-1].replace(".", "_")
+        basename = file_path.split("/")[-1]
+        basename_no_ext = basename.rsplit(".", 1)[0]
         from codesense_v1 import cache
         module_key = cache.safe_key(module_name)
-        file_key = cache.safe_key(file_stem)
+        file_key = f"{module_key}_{basename_no_ext}"
         write_path = f".codesense/modules/{module_key}/{file_key}.md"
         return (
             f"已保存模块 '{module_name}' 中文件 '{file_path}' 的子模块文档"

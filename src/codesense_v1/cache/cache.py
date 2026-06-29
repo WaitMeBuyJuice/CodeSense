@@ -11,6 +11,7 @@ project_map, modules_index, project_map.json, and all module files.
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,51 +114,58 @@ def write_modules_index(
 
 
 def read_module_hashes(codesense_dir: Path) -> dict[str, str]:
-    """Return the per-module hash table from ``modules/.hashes.json``.
+    """Aggregate module overview hashes from each ``modules/<mkey>/.hashes.json``.
 
+    Each per-module ``.hashes.json`` stores at least a ``"overview"`` key.
+    Returns ``{mkey: hash}`` for all modules that have a recorded overview hash.
     Returns an empty dict on any error (treat as all-miss).
     """
-    try:
-        raw = (codesense_dir / _MODULES_DIR / _MODULE_HASHES_FILE).read_text(
-            encoding="utf-8"
-        )
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            return {}
-        result: dict[str, str] = {}
-        for k, v in data.items():
-            if isinstance(v, str):
-                result[k] = v  # legacy flat format
-            elif isinstance(v, dict):
-                result[k] = str(v.get("hash", ""))
+    modules_dir = codesense_dir / _MODULES_DIR
+    result: dict[str, str] = {}
+    if not modules_dir.is_dir():
         return result
-    except Exception:  # noqa: BLE001
-        return {}
+    for child in modules_dir.iterdir():
+        if not child.is_dir():
+            continue
+        mkey = child.name
+        hashes_path = child / _MODULE_HASHES_FILE
+        try:
+            data = json.loads(hashes_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                continue
+            entry = data.get("overview")
+            if isinstance(entry, str):
+                result[mkey] = entry
+            elif isinstance(entry, dict):
+                result[mkey] = str(entry.get("hash", ""))
+        except Exception:  # noqa: BLE001
+            continue
+    return result
 
 
 def write_module_hash(codesense_dir: Path, module_key_str: str, module_hash: str) -> None:
-    """Upsert *module_hash* + ``generated_at`` for *module_key_str* in ``modules/.hashes.json``."""
-    modules_dir = codesense_dir / _MODULES_DIR
-    modules_dir.mkdir(parents=True, exist_ok=True)
-    hashes_path = modules_dir / _MODULE_HASHES_FILE
+    """Upsert *module_hash* under key ``"overview"`` in ``modules/<mkey>/.hashes.json``."""
+    mkey_dir = codesense_dir / _MODULES_DIR / module_key_str
+    mkey_dir.mkdir(parents=True, exist_ok=True)
+    hashes_path = mkey_dir / _MODULE_HASHES_FILE
     try:
         full_data: dict[str, object] = json.loads(hashes_path.read_text(encoding="utf-8"))
         if not isinstance(full_data, dict):
             full_data = {}
     except Exception:  # noqa: BLE001
         full_data = {}
-    full_data[module_key_str] = {"hash": module_hash, "generated_at": _now_iso()}
+    full_data["overview"] = {"hash": module_hash, "generated_at": _now_iso()}
     hashes_path.write_text(
         json.dumps(full_data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
 def read_module(codesense_dir: Path, module_key_str: str) -> str | None:
-    """Return module summary from ``modules/<module_key>.md``, or ``None`` if missing."""
+    """Return module summary from ``modules/<mkey>/<mkey>_overview.md``, or ``None`` if missing."""
     try:
-        return (codesense_dir / _MODULES_DIR / f"{module_key_str}.md").read_text(
-            encoding="utf-8"
-        )
+        return (
+            codesense_dir / _MODULES_DIR / module_key_str / f"{module_key_str}_overview.md"
+        ).read_text(encoding="utf-8")
     except Exception:  # noqa: BLE001
         return None
 
@@ -170,15 +178,16 @@ def write_module(
     current_hash: str,
     module_content_hash: str = "",
 ) -> None:
-    """Write ``modules/<module_key>.md``, update per-module hash, update ``meta.json``.
+    """Write ``modules/<mkey>/<mkey>_overview.md``, update per-module hash, update ``meta.json``.
 
-    *module_content_hash* is stored in ``modules/.hashes.json`` for per-module
-    invalidation.  Pass an empty string to skip hash persistence.
-    Creates ``codesense_dir/modules/`` if needed.
+    *module_content_hash* is stored in ``modules/<mkey>/.hashes.json`` under key
+    ``"overview"`` for per-module invalidation.  Pass an empty string to skip hash
+    persistence.
+    Creates ``codesense_dir/modules/<mkey>/`` if needed.
     """
-    modules_dir = codesense_dir / _MODULES_DIR
-    modules_dir.mkdir(parents=True, exist_ok=True)
-    (modules_dir / f"{module_key_str}.md").write_text(summary, encoding="utf-8")
+    mkey_dir = codesense_dir / _MODULES_DIR / module_key_str
+    mkey_dir.mkdir(parents=True, exist_ok=True)
+    (mkey_dir / f"{module_key_str}_overview.md").write_text(summary, encoding="utf-8")
     if module_content_hash:
         write_module_hash(codesense_dir, module_key_str, module_content_hash)
     _write_meta(codesense_dir, current_hash)
@@ -251,16 +260,11 @@ def _write_meta(codesense_dir: Path, current_hash: str) -> None:
 
 
 def _clear_modules_dir(codesense_dir: Path) -> None:
-    """Delete all files under ``modules/`` and the directory itself if empty."""
+    """Delete the entire ``modules/`` directory tree."""
     modules_dir = codesense_dir / _MODULES_DIR
     if modules_dir.is_dir():
-        for child in modules_dir.iterdir():
-            try:
-                child.unlink()
-            except OSError:
-                pass
         try:
-            modules_dir.rmdir()
+            shutil.rmtree(modules_dir)
         except OSError:
             pass
 
@@ -367,7 +371,12 @@ def read_submodule_hashes(codesense_dir: Path, module_key: str) -> dict[str, str
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return {k: v.get("hash", "") for k, v in data.items() if isinstance(v, dict)}
+        # Exclude the "overview" key — that belongs to the module-level hash
+        return {
+            k: (v.get("hash", "") if isinstance(v, dict) else str(v))
+            for k, v in data.items()
+            if k != "overview" and isinstance(v, (dict, str))
+        }
     except Exception:  # noqa: BLE001
         return {}
 
@@ -411,27 +420,17 @@ def write_submodule(
 
 
 def _prune_stale_modules(codesense_dir: Path, active_keys: set[str]) -> None:
-    """Remove ``.md`` files and hash entries for modules no longer in *active_keys*.
+    """Remove module subdirectories whose name is not in *active_keys*.
 
-    Preserves ``.hashes.json`` and any ``.md`` whose stem is still active.
+    Each module now lives in its own directory ``modules/<mkey>/``; this function
+    deletes any directory whose name (the module key) is absent from *active_keys*.
     """
     modules_dir = codesense_dir / _MODULES_DIR
     if not modules_dir.is_dir():
         return
     for child in modules_dir.iterdir():
-        if child.name == _MODULE_HASHES_FILE:
-            continue
-        if child.suffix == ".md" and child.stem not in active_keys:
+        if child.is_dir() and child.name not in active_keys:
             try:
-                child.unlink()
+                shutil.rmtree(child)
             except OSError:
                 pass
-    # Prune stale entries from .hashes.json
-    hashes = read_module_hashes(codesense_dir)
-    stale = [k for k in hashes if k not in active_keys]
-    if stale:
-        for k in stale:
-            del hashes[k]
-        (modules_dir / _MODULE_HASHES_FILE).write_text(
-            json.dumps(hashes, ensure_ascii=False, indent=2), encoding="utf-8"
-        )

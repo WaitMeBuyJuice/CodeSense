@@ -1,19 +1,17 @@
 {
-  "generated_at": "2026-06-29T04:32:37.702466+00:00",
+  "generated_at": "2026-06-29T07:50:34.775152+00:00",
   "modules": [
     {
-      "name": "错误定义",
-      "description": "工具领域异常基类",
-      "directories": [
-        "src/codesense_v1"
-      ],
+      "name": "errors",
+      "description": "工具领域异常基类、定义统一错误层级",
+      "directories": [],
       "files": [
         "src/codesense_v1/errors.py"
       ]
     },
     {
-      "name": "缓存管理",
-      "description": ".codesense/ 目录缓存读写",
+      "name": "cache",
+      "description": "管理 .codesense 缓存文件的读写、校验与失效",
       "directories": [
         "src/codesense_v1/cache"
       ],
@@ -23,8 +21,8 @@
       ]
     },
     {
-      "name": "数据层",
-      "description": "文件/符号/边的数据库层与目录级聚合",
+      "name": "data",
+      "description": "CodeGraph 数据库查询、目录级依赖聚合与文件分析",
       "directories": [
         "src/codesense_v1/data"
       ],
@@ -43,8 +41,8 @@
       ]
     },
     {
-      "name": "工具注册",
-      "description": "MCP 工具注册分发与 JSON Schema 校验",
+      "name": "registry",
+      "description": "MCP 工具注册中心、管理工具元数据与参数校验",
       "directories": [
         "src/codesense_v1/registry"
       ],
@@ -54,8 +52,8 @@
       ]
     },
     {
-      "name": "服务入口",
-      "description": "MCP stdio 服务器入口",
+      "name": "server",
+      "description": "MCP stdio 服务器入口、构建并启动服务",
       "directories": [
         "src/codesense_v1/server"
       ],
@@ -66,8 +64,8 @@
       ]
     },
     {
-      "name": "摘要协调",
-      "description": "协调数据层与缓存层生成项目映射/模块摘要",
+      "name": "summarizer",
+      "description": "协调 Data Layer 与 Cache、生成架构摘要 Markdown",
       "directories": [
         "src/codesense_v1/summarizer"
       ],
@@ -77,8 +75,8 @@
       ]
     },
     {
-      "name": "工具实现",
-      "description": "MCP 工具实现与编排调用",
+      "name": "tools",
+      "description": "MCP 工具实现层（project_map、explore_module 等）",
       "directories": [
         "src/codesense_v1/tools"
       ],

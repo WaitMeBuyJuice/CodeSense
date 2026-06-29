@@ -3,12 +3,12 @@
 
 | 模块 | 上游（依赖于我） | 下游（我依赖） |
 |------|----------------|--------------|
-| 工具实现 | 无 | 工具注册、摘要协调、数据层、缓存管理、错误定义 |
-| 工具注册 | 工具实现、服务入口 | 错误定义 |
-| 摘要协调 | 工具实现 | 数据层、缓存管理、错误定义 |
-| 数据层 | 工具实现、摘要协调 | 无 |
-| 服务入口 | 无 | 工具注册 |
-| 缓存管理 | 工具实现、摘要协调 | 无 |
-| 错误定义 | 工具实现、工具注册、摘要协调 | 无 |
+| cache | summarizer、tools | 无 |
+| data | summarizer、tools | 无 |
+| errors | registry、summarizer、tools | 无 |
+| registry | server、tools | errors |
+| server | 无 | registry |
+| summarizer | tools | cache、data、errors |
+| tools | 无 | cache、data、errors、registry、summarizer |
 
 > 无循环依赖。

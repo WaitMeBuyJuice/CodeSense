@@ -1,19 +1,21 @@
 ## 仓库定位
 
-CodeSense V1 是一款基于 MCP（Model Context Protocol）的代码智能分析服务，为 AI 编程助手提供代码库的结构化理解能力。
+CodeSense V1 是一个 MCP（Model Context Protocol）服务器，为 AI 编码助手（CodeMaker Agent）提供代码仓库的架构理解能力。
 
-项目解决的核心问题：大型代码库中，AI 助手缺乏对项目架构、模块职责、符号关系的全局认知。CodeSense V1 通过代码索引、缓存管理和结构化摘要，将代码库的架构信息以 MCP 工具形式暴露给 LLM Agent。
+项目解决的核心问题是：当 AI Agent 面对一个不熟悉的代码仓库时，缺乏高层级的架构认知。CodeSense 通过对仓库进行静态分析（文件结构、符号提取、目录依赖），自动划分模块并生成 Markdown 格式的架构摘要，使 Agent 能够快速理解模块职责、接口契约和依赖关系。
 
-目标用户为集成 MCP 客户端的 AI 编程工具（如 Cursor、VS Code Cline 等），核心价值在于让 AI 助手在回答代码问题时能快速定位模块边界、理解调用链和评估变更影响范围，无需每次都从零扫描整个代码库。
+目标用户是通过 MCP 协议接入的 AI 编码助手，特别是 CodeMaker VSCode 插件。核心价值是将代码仓库的结构化知识按需注入 Agent 上下文，大幅提升 Agent 在大型代码库中的导航和修改准确率。
 
 ## 技术栈
 
 | 类别 | 内容 |
 |------|------|
-| 主语言 | Python 3.14+ |
-| 核心框架 | MCP (mcp.server.stdio) |
-| 关键依赖 | openai (LLM 调用), json-repair (JSON 修复), pathspec (文件忽略规则), jsonschema (工具参数校验) |
-| 构建工具 | hatchling |
-| 类型检查 | mypy (strict mode) |
+| 主语言 | Python 3.14 |
+| 核心框架 | MCP Python SDK（官方 mcp 包） |
+| 传输协议 | MCP stdio |
+| 关键依赖 | openai（LLM 调用）、jsonschema（参数校验）、json-repair（JSON 修复）、pathspec（gitignore 解析） |
+| 构建工具 | Hatchling（wheel 构建） |
+| 类型检查 | mypy（strict 模式） |
 | 代码检查 | ruff |
 | 测试框架 | pytest + pytest-asyncio |
+| 目标平台 | Windows |

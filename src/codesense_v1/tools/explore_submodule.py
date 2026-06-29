@@ -136,8 +136,9 @@ async def explore_submodule(module_name: str, file_path: str) -> str:
         current_hash = _compute_submodule_hash(file_path, db)
 
     mkey = cache.safe_key(module_name)
-    file_stem = file_path.split("/")[-1].replace(".", "_")
-    file_key = cache.safe_key(file_stem)
+    basename = file_path.split("/")[-1]
+    basename_no_ext = basename.rsplit(".", 1)[0]
+    file_key = f"{mkey}_{basename_no_ext}"
 
     # Cache check
     cached_md = cache.read_submodule(codesense_dir, mkey, file_key)

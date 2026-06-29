@@ -2,20 +2,23 @@
 
 | 关键词 / 业务概念 | 对应模块 | 核心符号 | 备注 |
 |-----------------|---------|---------|------|
-| 项目映射 | 工具实现 / 摘要协调 | project_map / get_project_map_prompt | 工具实现 是 MCP 入口，摘要协调 是核心逻辑 |
-| 模块划分 | 摘要协调 | submit_project_map / _parse_modules_text | 将模块文本解析为结构化缓存 |
-| 模块探索 | 工具实现 | explore_module / get_module_prompt | 查看模块内部结构、文件和符号 |
-| 缓存失效 | 缓存管理 | invalidate / invalidate_segments / is_cache_valid | 对比 db_hash 判断缓存是否需要重建 |
-| segment(段落) | 缓存管理 / 摘要协调 | read_segment / write_segment / save_project_map_segment | project_map 由多个 segment 组成，可独立缓存和重建 |
-| prompt 生成 | 摘要协调 | get_identity_segment_prompt / get_module_prompt / get_project_map_prompt | 为 LLM 分析生成上下文 prompt |
-| 工具注册 | 工具注册 | ToolSpec / tool(装饰器) / dispatch | 声明式 MCP 工具定义，参数 JSON Schema 自动校验 |
-| MCP 工具调用 | 服务入口 / 工具实现 | _call_tool / build_server | 服务入口 接收 → 工具注册 分发 → 工具实现 执行 |
-| 项目根路径 | 工具实现 | resolve_project_root | 通过 MCP roots / 环境变量 / CWD 搜索定位项目根 |
-| 代码图数据库 | 数据层 | CodeGraphDB / NodeRow / EdgeRow | 文件/符号/边的结构化存储与查询 |
-| 目录依赖 | 数据层 | directory_edges / directory_dependencies | 模块间 import 依赖关系聚合 |
-| 架构特征 | 数据层 | ArchitectureFeatures / DirCentrality | 计算目录中心性和架构层级 |
-| 缓存哈希 | 缓存管理 | db_hash / compute_structure_hash | 用于检测代码变更以触发缓存失效 |
-| project_map vs save_project_map_segment | 工具实现 vs 缓存管理 | project_map / save_project_map_segment_tool | project_map 返回完整架构概览；save_project_map_segment 仅保存单个段落到缓存 |
-| submit_project_map vs submit_project_map_tool | 摘要协调 vs 工具实现 | submit_project_map / submit_project_map_tool | 摘要协调 是核心逻辑；工具实现 是 MCP 包装入口 |
-| 错误处理 | 错误定义 | ToolError / ValidationError / LLMError / InvalidArgumentError | 所有异常继承 ToolError 基类 |
-| 架构摘要 | 摘要协调 | render_project_map_markdown / get_architecture_segment_prompt | 将模块数据渲染为 Markdown 架构文档 |
+| 项目架构概览 | tools | project_map | 返回整个仓库的高层架构信息 |
+| 模块探索 | tools | explore_module | 深入查看单个模块的接口与依赖 |
+| 子模块探索 | tools | explore_submodule | 查看模块内某个文件的细节 |
+| 缓存失效 | cache | invalidate, invalidate_segments | 清除过期缓存数据 |
+| 缓存校验 | cache | is_cache_valid, is_segment_valid | 比对 hash 判断缓存是否有效 |
+| 缓存读取 | cache | read_project_map, read_module, read_segment | 从 .codesense/ 读取缓存 |
+| 缓存写入 | cache | write_module, write_segment, write_project_map | 写入架构摘要到 .codesense/ |
+| 模块划分提交 | summarizer | submit_project_map | Agent 提交模块划分结果，与 save_project_map_segment 不同：前者通过文本行提交全部模块，后者保存单个段落 |
+| 段落保存 | summarizer | save_project_map_segment | 保存 project_map 的某个段落（如 01_identity），与 submit_project_map 不同 |
+| 模块摘要保存 | summarizer | save_module_summary | 保存单个模块的完整架构摘要 |
+| 提示词获取 | summarizer | get_project_map_prompt, get_module_prompt | 返回 LLM 分析提示词，供 Agent 生成摘要 |
+| 工具注册 | registry | tool, deco, list_tools | 装饰器注册 MCP 工具 + 导出工具列表 |
+| 工具分发 | registry | dispatch | jsonschema 校验 + 路由到具体工具函数 |
+| 数据库查询 | data | CodeGraphDB | 封装 CodeGraph SQLite 数据库的查询接口 |
+| 目录依赖 | data | directory_dependencies, directory_edges | 聚合同目录下文件级边为目录级依赖 |
+| 架构特征 | data | ArchitectureFeatures, architecture_features | 提取项目的架构特征（循环依赖、层次等） |
+| 文档字符串提取 | data | extract_file_docstring, extract_symbol_docstrings | 提取源码中的文件/符号文档注释 |
+| 项目根定位 | tools | resolve_project_root | 通过环境变量/MCP根目录/CWD搜索定位项目根 |
+| 服务器入口 | server | main, run_stdio | 启动 stdio MCP 服务器主循环 |
+| 异常层级 | errors | ToolError, ValidationError, InvalidArgumentError, LLMError | 所有业务异常继承 ToolError，区分不同错误类型 |

@@ -1,16 +1,21 @@
-## 模块列表
+## 系统分层与模块列表
 
-| 模块名 | 职责 | 路径 | 架构层 |
-|--------|------|------|--------|
-| 错误定义 | 工具领域异常基类，所有业务/校验错误都继承 ToolError | `src/codesense_v1` | 第0层 |
-| 缓存管理 | .codesense/ 目录缓存读写与失效管理，提供 segment 级和模块级缓存 | `src/codesense_v1/cache` | 第0层 |
-| 数据层 | CodeGraph DB 封装：文件/符号/边的结构化存储，目录级依赖聚合与架构特征计算 | `src/codesense_v1/data` | 第0层 |
-| 工具注册 | MCP 工具声明式注册与 JSON Schema 参数校验，工具路由分发 | `src/codesense_v1/registry` | 第1层 |
-| 摘要协调 | 协调数据层与缓存层，生成项目映射/模块摘要的 Markdown 内容，纯函数式协调 | `src/codesense_v1/summarizer` | 第1层 |
-| 服务入口 | MCP stdio 服务器启动与生命周期管理，工具列表/调用的 MCP 协议处理 | `src/codesense_v1/server` | 第2层（入口）|
-| 工具实现 | MCP 工具具体实现，解析项目根路径，编排调用摘要协调/缓存管理/数据层 | `src/codesense_v1/tools` | 第2层（入口）|
+### 架构分层
 
-### 架构层级
-- **第0层（基础层）**：错误定义、缓存管理、数据层 — 被上层依赖，无内部出边，互不依赖
-- **第1层（协调层）**：工具注册、摘要协调 — 依赖第0层，被第2层依赖
-- **第2层（入口层）**：服务入口、工具实现 — 依赖第1层和第0层，不被其他模块依赖
+```
+第2层（入口层）: server, tools
+第1层（中间层）: summarizer, registry
+第0层（基础层）: data, cache, errors
+```
+
+### 模块详情
+
+| 模块名 | 职责 | 路径 |
+|--------|------|------|
+| errors | 工具领域异常基类，定义统一错误层级 | src/codesense_v1/errors.py |
+| cache | 管理 .codesense 缓存文件的读写、校验与失效 | src/codesense_v1/cache |
+| data | CodeGraph 数据库查询、目录级依赖聚合与文件分析 | src/codesense_v1/data |
+| registry | MCP 工具注册中心，管理工具元数据与参数校验 | src/codesense_v1/registry |
+| server | MCP stdio 服务器入口，构建并启动服务 | src/codesense_v1/server |
+| summarizer | 协调 Data Layer 与 Cache，生成架构摘要 Markdown | src/codesense_v1/summarizer |
+| tools | MCP 工具实现层（project_map、explore_module 等） | src/codesense_v1/tools |
