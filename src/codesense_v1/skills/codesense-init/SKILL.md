@@ -12,17 +12,6 @@ description: >
 
 ---
 
-## 前置条件
-
-在开始前确认：
-
-- 已在项目目录运行 `codegraph init -i`，`.codegraph/codegraph.db` 存在
-- CodeSense MCP 服务已启动
-
-若 `codegraph.db` 不存在，先执行 `codegraph init -i`，再继续。
-
----
-
 ## Phase 0：初始化项目配置
 
 在开始生成知识文档前，先配置 `.codesense/.codesense_config`。
