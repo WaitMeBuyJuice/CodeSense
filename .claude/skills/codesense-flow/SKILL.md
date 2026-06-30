@@ -90,9 +90,9 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 | 要深入某子模块实现 | Step 3：`explore_submodule` |
 | 查某函数被谁调用 | `codegraph_callers` |
 | 理解某段逻辑 / 探索某区域 | `codegraph_explore` |
-| 已知文件路径 | 	`codegraph_node` / `read_file` | 
-| 已知符号名 |  `codegraph_node` / `codegraph_callers` | 
-| 已知文本内容 | 	`grep` | 
+| 已知文件路径 | 	`codegraph_node` / `read_file` |
+| 已知符号名 |  `codegraph_node` / `codegraph_callers` |
+| 已知文本内容 | 	`grep` |
 
 ---
 
@@ -152,4 +152,3 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 1. `project_map` → 直接获得模块列表、各模块职责、分层结构与跨模块依赖，问题已回答，停止。
 
 ---
-

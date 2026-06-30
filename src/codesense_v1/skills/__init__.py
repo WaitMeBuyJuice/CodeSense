@@ -15,6 +15,7 @@ class Skill:
     name: str
     description: str
     body: str
+    raw: str  # full original SKILL.md text (frontmatter included)
 
 
 def _parse_skill(text: str) -> tuple[str, str, str]:
@@ -67,7 +68,7 @@ def _load_skill(dir_name: str) -> Skill:
     pkg = importlib.resources.files("codesense_v1.skills")
     text = (pkg / dir_name / "SKILL.md").read_text(encoding="utf-8")
     name, description, body = _parse_skill(text)
-    return Skill(name=name or dir_name, description=description, body=body)
+    return Skill(name=name or dir_name, description=description, body=body, raw=text)
 
 
 # Eagerly loaded at import time — fails fast on startup if any bundled file is missing.

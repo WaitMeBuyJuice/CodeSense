@@ -107,6 +107,7 @@ async def run_stdio() -> None:
 def main() -> None:
     """同步入口：asyncio.run(run_stdio())。供 `codesense` 命令调用。"""
     _init_codesenseignore()
+    _init_skills()
     asyncio.run(run_stdio())
 
 
@@ -132,6 +133,23 @@ def _init_codesenseignore() -> None:
         "# scripts/\n",
         encoding="utf-8",
     )
+
+
+def _init_skills() -> None:
+    """将打包的 SKILL.md 文件写入 {CODESENSE_PROJECT_ROOT}/.claude/skills/<name>/SKILL.md。
+
+    仅当目标文件不存在或内容与打包版本不一致时才写入，确保每次服务升级后 Skill 同步更新。
+    """
+    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
+    if not project_root_str:
+        return
+    skills_dir = Path(project_root_str) / ".claude" / "skills"
+    for skill in _skills.list_skills():
+        target = skills_dir / skill.name / "SKILL.md"
+        if target.exists() and target.read_text(encoding="utf-8") == skill.raw:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(skill.raw, encoding="utf-8")
 
 
 if __name__ == "__main__":
