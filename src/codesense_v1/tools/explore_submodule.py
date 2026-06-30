@@ -122,6 +122,7 @@ async def explore_submodule(
     mkey = cache.safe_key(module_name)
 
     if subgroup_name is not None:
+        subgroup_name = subgroup_name.replace("/", "_").replace("\\", "_").replace("..", "__")
         # Subgroup mode
         subgroups_raw = entry.get("subgroups") or []
         sg_entry: dict | None = None

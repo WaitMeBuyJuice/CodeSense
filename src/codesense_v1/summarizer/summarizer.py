@@ -43,7 +43,7 @@ _CODESENSE_DIR_NAME = ".codesense"
 _EXTERNAL_PREFIX = "external::"
 _DESC_MAX_LEN = 60
 _NAME_MIN_LEN = 2
-_NAME_MAX_LEN = 20
+_NAME_MAX_LEN = 32
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
@@ -92,7 +92,6 @@ def _is_generic_name(name: str) -> bool:
     base = name.lstrip("_").lower()
     return (
         base in _GENERIC_SYMBOL_NAMES
-        or any(base.startswith(p) for p in ("on_", "do_", "handle_"))
     )
 
 
@@ -261,7 +260,7 @@ def _normalize_dir(
         cannot be matched; ``is_fuzzy`` is ``True`` when the result came from
         fuzzy matching rather than an exact hit.
     """
-    d = d.strip().strip("`").strip("'").strip('"').rstrip("/").replace("\\", "/")
+    d = re.sub(r'^[`\'"]+|[`\'"]+$', '', d.strip()).rstrip("/").replace("\\", "/")
     if not d:
         return None, False
     if not valid_dirs:
@@ -426,10 +425,16 @@ def _migrate_renamed_module_caches(
         if new_key in existing_hashes:
             continue  # new name already has its own cache, don't overwrite
 
-        old_md = modules_dir / f"{old_key}.md"
-        new_md = modules_dir / f"{new_key}.md"
+        old_dir = modules_dir / old_key
+        new_dir = modules_dir / new_key
+        old_md = old_dir / f"{old_key}_overview.md"
+        new_md = new_dir / f"{new_key}_overview.md"
         if old_md.exists() and not new_md.exists():
-            old_md.rename(new_md)
+            if old_dir.exists() and not new_dir.exists():
+                old_dir.rename(new_dir)
+                # After directory rename, point to file under new_dir
+                renamed_md = new_dir / f"{old_key}_overview.md"
+                renamed_md.rename(new_dir / f"{new_key}_overview.md")
             cache.write_module_hash(codesense_dir, new_key, old_hash)
             # old_key entry is left for _prune_stale_modules to delete
 
@@ -462,7 +467,7 @@ async def submit_project_map(project_root: Path, response: str) -> str:
 
         roots, aux_dirs = _resolve_roots_and_aux(all_file_paths, project_root)
         all_file_paths_l1 = [
-            p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
+            p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)
         ]
         dir_deps_l1 = _filter_dir_deps(dir_deps, roots)
         dir_syms_l1 = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
@@ -513,12 +518,19 @@ async def submit_project_map(project_root: Path, response: str) -> str:
     cache.write_segment(codesense_dir, "07_dependencies", seg07_content, seg07_hash)
 
     # Render and persist the new segment-based project_map.md.
-    cache.render_project_map(codesense_dir)
+    rendered = cache.render_project_map(codesense_dir)
 
     n_modules = len(expanded)
     warning_suffix = ""
     if warnings:
         warning_suffix = "\n\n⚠️ 解析警告：\n" + "\n".join(f"- {w}" for w in warnings)
+
+    if rendered is None:
+        return (
+            f"模块划分已保存（{n_modules} 个模块）。"
+            "模块划分已保存，但部分段尚未生成，请重新调用 `project_map` 完成其余段的生成。"
+            + warning_suffix
+        )
 
     return (
         f"模块划分已保存（{n_modules} 个模块）。"
@@ -829,15 +841,12 @@ def save_module_summary(
     if subgroups is None:
         subgroups, summary = _extract_subgroups_from_summary(summary)
 
-    with CodeGraphDB(project_root) as db:
-        module_hash = _compute_module_hash(entry, db)
-
-    cache.write_module(codesense_dir, mkey, module_name, summary, current_hash, module_hash)
-
+    # Clean subgroups and update entry before hash computation so the stored
+    # hash matches what explore_module will compute (which reads the updated
+    # index that includes subgroups).
+    cleaned_subgroups: list[dict] = []
     if subgroups is not None:
-        # Clean: only keep subgroup items whose files are still in entry["files"]
         module_files = set(str(f) for f in (entry.get("files") or []))
-        cleaned_subgroups: list[dict] = []
         for sg in subgroups:
             sg_files = [f for f in (sg.get("files") or []) if f in module_files]
             if sg_files:
@@ -846,6 +855,15 @@ def save_module_summary(
                     "description": str(sg.get("description", "")),
                     "files": sg_files,
                 })
+        # Mutate entry so _compute_module_hash sees the same subgroups
+        entry["subgroups"] = cleaned_subgroups
+
+    with CodeGraphDB(project_root) as db:
+        module_hash = _compute_module_hash(entry, db)
+
+    cache.write_module(codesense_dir, mkey, module_name, summary, current_hash, module_hash)
+
+    if cleaned_subgroups:
         # Update modules_index with new subgroups
         updated_index = cache.read_modules_index(codesense_dir)
         if updated_index is not None:
@@ -855,11 +873,14 @@ def save_module_summary(
                     m = dict(m)
                     m["subgroups"] = cleaned_subgroups
                 updated_modules.append(m)
+            aux_dirs = updated_index.get("auxiliary_dirs")
+            if not isinstance(aux_dirs, list):
+                aux_dirs = None
             cache.write_modules_index(
                 codesense_dir,
                 updated_modules,
                 current_hash,
-                updated_index.get("auxiliary_dirs"),  # type: ignore[arg-type]
+                aux_dirs,  # type: ignore[arg-type]
             )
 
 

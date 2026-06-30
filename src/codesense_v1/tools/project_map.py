@@ -27,6 +27,7 @@ from codesense_v1.data.hashes import _sha256
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import (
     _build_symbol_module_map,
+    _resolve_roots_and_aux,
     get_concepts_segment_prompt,
     get_constraints_segment_prompt,
     get_flows_segment_prompt,
@@ -105,6 +106,9 @@ async def project_map(_nonce: str | None = None) -> str:
 
     auto_expire = is_auto_expire_enabled(project_root)
 
+    modules_index = cache.read_modules_index(codesense_dir)
+    saved_modules = (modules_index or {}).get("modules", [])
+
     # ---- Gather data --------------------------------------------------------
     with CodeGraphDB(project_root) as db:
         modules_data = list_modules(db)
@@ -114,20 +118,21 @@ async def project_map(_nonce: str | None = None) -> str:
         tree_root = directory_tree(db)
         identity_sources = collect_identity_sources(project_root, db)
         all_db_edges = list(db.iter_edges())
+        symbol_map = _build_symbol_module_map(saved_modules, db)
 
     top_dirs = classify_top_dirs(all_file_paths)
     cycles = find_cycles(edges_internal, modules_data)
-
-    modules_index = cache.read_modules_index(codesense_dir)
-    saved_modules = (modules_index or {}).get("modules", [])
 
     # ---- Compute hashes -----------------------------------------------------
     hash_01 = compute_identity_hash(identity_sources)
     hash_02 = compute_structure_hash(top_dirs)
 
+    roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
+    all_file_paths_l1 = [p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)]
+
     all_parent_dirs = {
         fp.replace("\\", "/").rsplit("/", 1)[0]
-        for fp in all_file_paths
+        for fp in all_file_paths_l1
         if "/" in fp.replace("\\", "/")
     }
     current_leaf_dirs = sorted({
@@ -149,9 +154,6 @@ async def project_map(_nonce: str | None = None) -> str:
     )
     hash_05 = _sha256(json.dumps(calls_edges))
 
-    # 06: symbol-module map + module names/descriptions
-    with CodeGraphDB(project_root) as db2:
-        symbol_map = _build_symbol_module_map(saved_modules, db2)
     concepts_data = sorted(symbol_map.items())
     modules_desc = sorted(
         (str(m.get("name", "")), str(m.get("description", "")))

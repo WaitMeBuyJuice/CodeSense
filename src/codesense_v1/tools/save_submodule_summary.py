@@ -59,6 +59,8 @@ async def save_submodule_summary_tool(
         raise InvalidArgumentError("参数错误：module_name 不能为空")
     if subgroup_name is None and not file_path:
         raise InvalidArgumentError("参数错误：file_path 和 subgroup_name 至少提供一个")
+    if subgroup_name is not None:
+        subgroup_name = subgroup_name.replace("/", "_").replace("\\", "_").replace("..", "__")
     if not summary.strip():
         raise InvalidArgumentError("参数错误：summary 不能为空")
 
@@ -80,7 +82,7 @@ async def save_submodule_summary_tool(
             file_key = f"{module_key}_{subgroup_name}"
             label = f"子模块 '{subgroup_name}'"
         else:
-            basename = file_path.split("/")[-1]
+            basename = file_path.rstrip("/").split("/")[-1]
             basename_no_ext = basename.rsplit(".", 1)[0]
             file_key = f"{module_key}_{basename_no_ext}"
             label = f"文件 '{file_path}'"

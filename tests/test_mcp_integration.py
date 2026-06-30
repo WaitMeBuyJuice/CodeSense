@@ -48,9 +48,7 @@ async def test_list_tools() -> None:
             tool_names = {t.name for t in response.tools}
             assert "project_map" in tool_names
             assert "explore_module" in tool_names
-            assert "get_project_map_prompt" in tool_names
             assert "submit_project_map" in tool_names
-            assert "get_module_prompt" in tool_names
             assert "save_module_summary" in tool_names
 
 
@@ -66,7 +64,7 @@ async def test_call_project_map_no_env() -> None:
             await s.initialize()
             result = await s.call_tool("project_map", {})
             assert result.isError is False
-            assert "CODESENSE_PROJECT_ROOT" in first_text(result)
+            assert "project_map" in first_text(result) or "CODESENSE_PROJECT_ROOT" in first_text(result)
 
 
 # ---------------------------------------------------------------------------

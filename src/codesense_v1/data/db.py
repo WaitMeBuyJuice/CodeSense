@@ -61,7 +61,7 @@ class CodeGraphDB:
             )
         # `mode=ro` forces read-only; `uri=True` lets us pass it as a URI.
         uri = f"file:{self.db_path.as_posix()}?mode=ro"
-        self._conn = sqlite3.connect(uri, uri=True)
+        self._conn = sqlite3.connect(uri, uri=True, timeout=10)
         self._conn.row_factory = sqlite3.Row
 
     def close(self) -> None:

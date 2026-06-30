@@ -79,7 +79,7 @@ def test_write_project_map_creates_dir(tmp_path: Path) -> None:
 def test_write_project_map_updates_meta(tmp_path: Path) -> None:
     cs = _cs_dir(tmp_path)
     cache.write_project_map(cs, "x", "hash42")
-    meta = json.loads((cs / "meta.json").read_text(encoding="utf-8"))
+    meta = json.loads((cs / "project_map.json").read_text(encoding="utf-8"))
     assert meta["db_hash"] == "hash42"
     assert "generated_at" in meta
 
@@ -113,7 +113,7 @@ def test_write_read_modules_index(tmp_path: Path) -> None:
 def test_write_modules_index_updates_meta(tmp_path: Path) -> None:
     cs = _cs_dir(tmp_path)
     cache.write_modules_index(cs, [], "hash-idx")  # type: ignore[arg-type]
-    meta = json.loads((cs / "meta.json").read_text(encoding="utf-8"))
+    meta = json.loads((cs / "project_map.json").read_text(encoding="utf-8"))
     assert meta["db_hash"] == "hash-idx"
 
 
@@ -150,14 +150,14 @@ def test_read_write_module(tmp_path: Path) -> None:
 def test_write_module_updates_meta(tmp_path: Path) -> None:
     cs = _cs_dir(tmp_path)
     cache.write_module(cs, "src_auth", "Auth 模块", "summary", "hash99")
-    meta = json.loads((cs / "meta.json").read_text(encoding="utf-8"))
+    meta = json.loads((cs / "project_map.json").read_text(encoding="utf-8"))
     assert meta["db_hash"] == "hash99"
 
 
 def test_write_module_json_structure(tmp_path: Path) -> None:
     cs = _cs_dir(tmp_path)
     cache.write_module(cs, "src_auth", "Auth 模块", "my summary", "h1")
-    content = (cs / "modules" / "src_auth.md").read_text(encoding="utf-8")
+    content = (cs / "modules" / "src_auth" / "src_auth_overview.md").read_text(encoding="utf-8")
     assert content == "my summary"
 
 

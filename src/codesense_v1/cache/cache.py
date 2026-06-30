@@ -244,6 +244,7 @@ def invalidate(codesense_dir: Path) -> None:
         except OSError:
             pass
     _clear_modules_dir(codesense_dir)
+    invalidate_segments(codesense_dir)
 
 
 def module_key(module_path: str) -> str:
@@ -466,5 +467,10 @@ def _prune_stale_modules(codesense_dir: Path, active_keys: set[str]) -> None:
         if child.is_dir() and child.name not in active_keys:
             try:
                 shutil.rmtree(child)
+            except OSError:
+                pass
+        elif child.is_file() and child.name != ".hashes.json":
+            try:
+                child.unlink()
             except OSError:
                 pass

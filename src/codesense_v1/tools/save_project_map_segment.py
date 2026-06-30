@@ -18,7 +18,7 @@ from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.hashes import _sha256
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
-from codesense_v1.summarizer import _build_symbol_module_map
+from codesense_v1.summarizer import _build_symbol_module_map, _resolve_roots_and_aux
 from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _VALID_SEGMENT_IDS = (
@@ -87,8 +87,10 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             source_hash = compute_identity_hash(sources)
 
         elif segment_id == "03_modules":
+            roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
+            all_file_paths_l1 = [p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)]
             all_parent_dirs = {
-                fp.rsplit("/", 1)[0] for fp in all_file_paths if "/" in fp
+                fp.rsplit("/", 1)[0] for fp in all_file_paths_l1 if "/" in fp
             }
             current_leaf_dirs = sorted({
                 d for d in all_parent_dirs
@@ -96,7 +98,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             })
             source_hash = compute_architecture_hash([current_leaf_dirs])
 
-        elif segment_id in ("04_constraints", "07_dependencies"):
+        elif segment_id == "04_constraints":
             edges_internal = [e for e in module_dependencies(db, include_external=False)]
             source_hash = compute_dependencies_hash(edges_internal)
 
@@ -109,7 +111,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             )
             source_hash = _sha256(json.dumps(calls_edges))
 
-        else:  # 06_concepts
+        elif segment_id == "06_concepts":  # 06_concepts
             modules_index = cache.read_modules_index(codesense_dir)
             saved_modules = (modules_index or {}).get("modules", [])
             symbol_map = _build_symbol_module_map(saved_modules, db)

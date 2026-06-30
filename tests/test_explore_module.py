@@ -84,8 +84,10 @@ async def test_explore_module_no_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("CODESENSE_PROJECT_ROOT", raising=False)
-    result = await registry.dispatch("explore_module", {"module_name": "缓存层"})
-    assert result.isError
+    with patch("codesense_v1.tools._project_root._root_from_cwd", return_value=None), \
+         patch("codesense_v1.tools._project_root._root_from_mcp", return_value=None):
+        result = await registry.dispatch("explore_module", {"module_name": "缓存层"})
+    assert not result.isError
     assert "CODESENSE_PROJECT_ROOT" in str(result.content)
 
 
@@ -139,7 +141,6 @@ async def test_explore_module_cache_miss_returns_guide(
     with patch(_EXPLORE_CG_DB, return_value=db_ctx):
         result = await registry.dispatch("explore_module", {"module_name": "缓存层"})
     assert not result.isError
-    assert "get_module_prompt" in str(result.content)
     assert "save_module_summary" in str(result.content)
 
 
