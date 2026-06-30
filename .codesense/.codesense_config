@@ -4,11 +4,11 @@
   "include_dirs": [],
   "ref_docs": {
     "comment": "参考文档路径列表（可以是文件或目录），用于分析时注入到 prompt 中，帮助 AI 理解项目背景",
-    "paths": ["doc/reference_documents/stack.md"],
+    "paths": [],
     "recursive": false
   },
   "ignore_docs": {
     "comment": "分析时需要排除的路径（可以是文件或目录），这些路径下的代码不会被分析",
-    "paths": ["tests/", "scripts/"]
+    "paths": []
   }
 }
