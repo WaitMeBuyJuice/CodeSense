@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-codesense_v1 = "codesense_v1.server:main"
+codesense = "codesense_v1.server:main"
 
 [dependency-groups]
 dev = [

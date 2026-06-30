@@ -6,9 +6,10 @@ from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, Tool
+from mcp.types import CallToolResult, GetPromptResult, Prompt, PromptMessage, TextContent, Tool
 
 from codesense_v1 import registry
+from codesense_v1 import skills as _skills  # noqa: F401 — 触发 Skill 加载
 from codesense_v1 import tools as _tools  # noqa: F401 — 触发工具注册
 
 SERVER_NAME: str = "CodeSense"
@@ -66,6 +67,28 @@ def build_server() -> Server:
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]
     async def _call_tool(name: str, arguments: dict[str, object]) -> CallToolResult:
         return await registry.dispatch(name, arguments)
+
+    @server.list_prompts()  # type: ignore[no-untyped-call, untyped-decorator]
+    async def _list_prompts() -> list[Prompt]:
+        return [
+            Prompt(name=s.name, description=s.description)
+            for s in _skills.list_skills()
+        ]
+
+    @server.get_prompt()  # type: ignore[no-untyped-call, untyped-decorator]
+    async def _get_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
+        skill = _skills.get_skill(name)
+        if skill is None:
+            raise ValueError(f"未知 Skill：'{name}'")
+        return GetPromptResult(
+            description=skill.description,
+            messages=[
+                PromptMessage(
+                    role="user",
+                    content=TextContent(type="text", text=skill.body),
+                )
+            ],
+        )
 
     return server
 
