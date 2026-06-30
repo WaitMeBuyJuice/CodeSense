@@ -1,0 +1,54 @@
+{
+  "scan_mode": "depth-1",
+  "repo_root": "E:\\Python_Project\\CodeSense_V1",
+  "top_level_modules": [
+    {
+      "module_id": "cache",
+      "src_path": "src/codesense_v1/cache",
+      "type": "library"
+    },
+    {
+      "module_id": "data",
+      "src_path": "src/codesense_v1/data",
+      "type": "library"
+    },
+    {
+      "module_id": "registry",
+      "src_path": "src/codesense_v1/registry",
+      "type": "library"
+    },
+    {
+      "module_id": "server",
+      "src_path": "src/codesense_v1/server",
+      "type": "application"
+    },
+    {
+      "module_id": "summarizer",
+      "src_path": "src/codesense_v1/summarizer",
+      "type": "library"
+    },
+    {
+      "module_id": "tools",
+      "src_path": "src/codesense_v1/tools",
+      "type": "library"
+    },
+    {
+      "module_id": "errors",
+      "src_path": "src/codesense_v1/errors.py",
+      "type": "library"
+    }
+  ],
+  "module_types": {
+    "application": ["server"],
+    "library": ["cache", "data", "registry", "summarizer", "tools", "errors"]
+  },
+  "anti_patterns": [],
+  "cross_module_hints": {
+    "server": ["tools", "registry", "cache", "errors"],
+    "tools": ["data", "registry", "summarizer", "errors"],
+    "summarizer": ["data", "cache", "errors"],
+    "data": ["registry", "errors"],
+    "registry": ["errors"],
+    "cache": []
+  }
+}

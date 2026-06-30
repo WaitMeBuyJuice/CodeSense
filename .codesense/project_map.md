@@ -1,24 +1,22 @@
 ## 仓库定位
 
-CodeSense V1 是一个 MCP（Model Context Protocol）服务器，为 AI 编码助手（CodeMaker Agent）提供代码仓库的架构理解能力。
+CodeSense 是一个 MCP（Model Context Protocol）服务，帮助 AI Agent 快速理解代码仓库的高层架构：项目组织方式、模块职责、内部结构以及模块间协作关系。
 
-项目解决的核心问题是：当 AI Agent 面对一个不熟悉的代码仓库时，缺乏高层级的架构认知。CodeSense 通过对仓库进行静态分析（文件结构、符号提取、目录依赖），自动划分模块并生成 Markdown 格式的架构摘要，使 Agent 能够快速理解模块职责、接口契约和依赖关系。
-
-目标用户是通过 MCP 协议接入的 AI 编码助手，特别是 CodeMaker VSCode 插件。核心价值是将代码仓库的结构化知识按需注入 Agent 上下文，大幅提升 Agent 在大型代码库中的导航和修改准确率。
+它读取 CodeGraph 生成的代码知识图谱（`.codegraph/codegraph.db`），按"全局 → 模块 → 子模块"的层级，向 Agent 提供结构化的认知信息，并把生成的摘要缓存到 `.codesense/` 目录复用。目标用户为宿主 AI Agent（如 CodeMaker）及通过 MCP 协议接入的客户端。核心价值在于：不直接调用 LLM，而是把 Data Layer 抽取的结构数据拼装成 prompt 返回给宿主 Agent，由 Agent 生成自然语言摘要后通过 `save_*` / `submit_*` 工具写回缓存——这种"Agent 即 LLM"协作模式避免了 API Key 硬编码，并让 prompt 迭代与生成解耦。
 
 ## 技术栈
 
 | 类别 | 内容 |
 |------|------|
-| 主语言 | Python 3.14 |
-| 核心框架 | MCP Python SDK（官方 mcp 包） |
-| 传输协议 | MCP stdio |
-| 关键依赖 | openai（LLM 调用）、jsonschema（参数校验）、json-repair（JSON 修复）、pathspec（gitignore 解析） |
-| 构建工具 | Hatchling（wheel 构建） |
-| 类型检查 | mypy（strict 模式） |
-| 代码检查 | ruff |
-| 测试框架 | pytest + pytest-asyncio |
-| 目标平台 | Windows |
+| 主语言 | Python（>=3.14） |
+| 核心框架 | MCP（Model Context Protocol，stdio 服务） |
+| 关键依赖 | mcp、jsonschema、openai>=2.41.1、json-repair>=0.30、pathspec>=0.12 |
+| 构建工具 | hatchling（wheel 打包，packages=src/codesense_v1） |
+| 类型检查 | mypy（strict，python_version=3.14） |
+| Linter | ruff（line-length=100，规则 E/F/I/B/UP） |
+| 测试框架 | pytest + pytest-asyncio（asyncio_mode=auto，testpaths=tests） |
+| 包管理 | uv（推荐） |
+| 入口 | `codesense = codesense_v1.server:main` |
 
 ---
 
@@ -41,27 +39,31 @@ CodeSense_V1/
 
 ---
 
-## 系统分层与模块列表
+## 模块划分
 
-### 架构分层
+依据 `src/codesense_v1/` 顶层目录结构划分，对应架构图 L1-L7 分层。每个模块给出英文名 key、中文名、一句话职责、文件路径。
 
-```
-第2层（入口层）: server, tools
-第1层（中间层）: summarizer, registry
-第0层（基础层）: data, cache, errors
-```
+| 英文名 key | 中文名 | 职责 | 文件路径 |
+|------------|--------|------|----------|
+| server | 入口层（L1） | MCP stdio 服务入口，实现 list_tools / call_tool / list_prompts / get_prompt | src/codesense_v1/server/ |
+| registry | 注册分发层（L2） | @tool 装饰器注册、JSON Schema 校验、工具派发 | src/codesense_v1/registry/ |
+| tools | 工具层（L3） | project_map / explore_module / explore_submodule / save_* / submit_* 等 MCP 工具实现 | src/codesense_v1/tools/ |
+| data | 数据层（L4） | 查询 CodeGraph SQLite（modules / architecture / docstrings / files 等） | src/codesense_v1/data/ |
+| summarizer | 摘要层（L6） | 将 Data Layer 结构数据拼装为 Markdown prompt | src/codesense_v1/summarizer/ |
+| cache | 基础设施层（L7） | .codesense/ 读写、DB hash 计算、缓存失效判断 | src/codesense_v1/cache/ |
+| skills | 内置 Skills | 内置 Skill 文件（启动时写入 .claude/skills/，MCP Prompts 协议备用） | src/codesense_v1/skills/ |
+| errors | 统一异常 | ToolError 异常体系 | src/codesense_v1/errors.py |
 
-### 模块详情
+### 模块文件清单
 
-| 模块名 | 职责 | 路径 |
-|--------|------|------|
-| errors | 工具领域异常基类，定义统一错误层级 | src/codesense_v1/errors.py |
-| cache | 管理 .codesense 缓存文件的读写、校验与失效 | src/codesense_v1/cache |
-| data | CodeGraph 数据库查询、目录级依赖聚合与文件分析 | src/codesense_v1/data |
-| registry | MCP 工具注册中心，管理工具元数据与参数校验 | src/codesense_v1/registry |
-| server | MCP stdio 服务器入口，构建并启动服务 | src/codesense_v1/server |
-| summarizer | 协调 Data Layer 与 Cache，生成架构摘要 Markdown | src/codesense_v1/summarizer |
-| tools | MCP 工具实现层（project_map、explore_module 等） | src/codesense_v1/tools |
+- **server**: src/codesense_v1/server/
+- **registry**: src/codesense_v1/registry/
+- **tools**: src/codesense_v1/tools/__init__.py, _project_root.py, explore_module.py, explore_submodule.py, project_map.py, save_module_summary.py, save_project_map_segment.py, save_submodule_summary.py, submit_project_map.py
+- **data**: src/codesense_v1/data/
+- **summarizer**: src/codesense_v1/summarizer/
+- **cache**: src/codesense_v1/cache/
+- **skills**: src/codesense_v1/skills/
+- **errors**: src/codesense_v1/errors.py
 
 ---
 

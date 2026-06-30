@@ -33,7 +33,7 @@ Thumbs.db
 # .codemaker/codeindex/
 # .codemaker/rules/codemap.mdc
 # .codemaker/mcps.json
-.claude/skills/codemap-*/
-.claude/skills/code-index-*/
+# .claude/skills/codemap-*/
+# .claude/skills/code-index-*/
 .codemap/
 opencode.json

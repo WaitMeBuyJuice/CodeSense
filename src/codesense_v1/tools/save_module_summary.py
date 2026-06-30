@@ -20,6 +20,23 @@ _SCHEMA: Final[dict[str, object]] = {
             "type": "string",
             "description": "模块摘要 Markdown 文本",
         },
+        "subgroups": {
+            "type": "array",
+            "description": (
+                "子模块划分（可选）。每项含 name（子模块名，格式 <module>_<标识>）、"
+                "description（职责说明）、files（文件路径列表）三个字段。"
+                "仅当本次自行划分了子模块时传入；已有划分无需重复传入。"
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "files": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["name", "description", "files"],
+            },
+        },
     },
     "required": ["module_name", "summary"],
     "additionalProperties": False,
@@ -33,11 +50,12 @@ _SCHEMA: Final[dict[str, object]] = {
         "仅在 explore_module 返回生成步骤引导时使用，通常委派给子 Agent 执行。\n"
         "正常使用时无需主动调用本工具。\n\n"
         "module_name 必须是 project_map 返回的模块名之一。\n"
+        "如果本次自行划分了子模块，可通过 subgroups 参数传入划分结果（已有划分无需重复传入）。\n"
         "保存成功后，主 Agent 重新调用 explore_module 即可获取模块摘要。"
     ),
     input_schema=_SCHEMA,
 )
-async def save_module_summary_tool(module_name: str, summary: str) -> str:
+async def save_module_summary_tool(module_name: str, summary: str, subgroups: list | None = None) -> str:
     module_name = module_name.strip()
     if not module_name:
         raise InvalidArgumentError("参数错误：module_name 不能为空")
@@ -47,7 +65,7 @@ async def save_module_summary_tool(module_name: str, summary: str) -> str:
     if project_root is None:
         return project_root_not_found_error()
     try:
-        summarizer.save_module_summary(project_root, module_name, summary)
+        summarizer.save_module_summary(project_root, module_name, summary, subgroups=subgroups)
         return f"已保存模块 '{module_name}' 的摘要（{len(summary)} 字符）。"
     except FileNotFoundError:
         return (

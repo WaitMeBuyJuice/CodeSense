@@ -35,11 +35,11 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 对每个计划探索、分析或修改的模块调用 `explore_module(module_name=<模块英文key>)`。
 
 返回内容：
-- 模块职责
-- 公开接口（导出函数和类）
-- 内部子模块及各子模块作用
-- 模块的实现约束清单
-- 模块的上下游依赖
+- 一句话定位
+- 架构简析（模块内部分层）
+- 子模块列表（子模块名 | 职责 | 包含文件）
+- 上下游依赖
+- 实现约束清单
 
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
@@ -53,13 +53,16 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 **触发条件**：需要深入理解某个具体子模块，修改模块内某个具体文件，或 explore_module 返回的信息不足以定位目标时。
 
-调用 `explore_submodule(module_name=<模块英文key>, file_path=<完整相对路径>)`。
+调用 `explore_submodule(module_name=<模块英文key>, subgroup_name=<子模块名>)`。
+
+- `subgroup_name` 从 `explore_module` 返回的「子模块列表」中取（如 `data_storage`、`cache_storage`）
+- 若模块尚未定义 subgroups，可用 `file_path=<完整相对路径>` 替代
 
 返回内容：
-- 子模块职责
-- 内部关键符号（函数、类）及其说明
-- 子模块的典型调用链
-- 子模块的上下游依赖
+- 子模块概述（业务职责）
+- 对外能力（该子模块对外提供什么能力）
+- 跨模块依赖（上游/下游模块）
+- 典型调用链
 
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
@@ -91,8 +94,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 | 查某函数被谁调用 | `codegraph_callers` |
 | 理解某段逻辑 / 探索某区域 | `codegraph_explore` |
 | 已知文件路径 | 	`codegraph_node` / `read_file` |
-| 已知符号名 |  `codegraph_node` / `codegraph_callers` |
-| 已知文本内容 | 	`grep` |
+| 已知符号名 |  `codegp` |
 
 ---
 
@@ -113,7 +115,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 1. 工具返回 cache miss + 内嵌 prompt
 2. Agent 按 prompt 推理，生成文档内容
 3. 调对应 save 工具写回缓存：
-   - `save_module_summary` — 保存模块总览
+   - `save_module_summary` — 保存模块总览（可选传 subgroups 定义子模块划分）
    - `save_submodule_summary` — 保存子模块文档
    - `save_project_map_segment` — 保存 project_map 各段（01/03/04/05/06）
 4. 重新调原工具，此时命中缓存正常返回
@@ -127,8 +129,8 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 **输入**：帮我给缓存模块加一个过期时间配置项
 
 1. `project_map` → 确认缓存模块位置与跨模块依赖
-2. `explore_module("cache")` → 看公开接口和内部文件
-3. `explore_submodule("cache", "src/codesense_v1/cache/cache.py")` → 看具体实现结构
+2. `explore_module("cache")` → 看架构简析、子模块列表和实现约束
+3. `explore_submodule("cache", subgroup_name="cache_storage")` → 看对外能力和典型调用链
 4. `codegraph_node(file="cache.py")` → 读源码定位修改点
 5. 修改
 

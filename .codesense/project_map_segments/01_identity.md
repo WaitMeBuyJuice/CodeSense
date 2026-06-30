@@ -1,21 +1,19 @@
 ## 仓库定位
 
-CodeSense V1 是一个 MCP（Model Context Protocol）服务器，为 AI 编码助手（CodeMaker Agent）提供代码仓库的架构理解能力。
+CodeSense 是一个 MCP（Model Context Protocol）服务，帮助 AI Agent 快速理解代码仓库的高层架构：项目组织方式、模块职责、内部结构以及模块间协作关系。
 
-项目解决的核心问题是：当 AI Agent 面对一个不熟悉的代码仓库时，缺乏高层级的架构认知。CodeSense 通过对仓库进行静态分析（文件结构、符号提取、目录依赖），自动划分模块并生成 Markdown 格式的架构摘要，使 Agent 能够快速理解模块职责、接口契约和依赖关系。
-
-目标用户是通过 MCP 协议接入的 AI 编码助手，特别是 CodeMaker VSCode 插件。核心价值是将代码仓库的结构化知识按需注入 Agent 上下文，大幅提升 Agent 在大型代码库中的导航和修改准确率。
+它读取 CodeGraph 生成的代码知识图谱（`.codegraph/codegraph.db`），按"全局 → 模块 → 子模块"的层级，向 Agent 提供结构化的认知信息，并把生成的摘要缓存到 `.codesense/` 目录复用。目标用户为宿主 AI Agent（如 CodeMaker）及通过 MCP 协议接入的客户端。核心价值在于：不直接调用 LLM，而是把 Data Layer 抽取的结构数据拼装成 prompt 返回给宿主 Agent，由 Agent 生成自然语言摘要后通过 `save_*` / `submit_*` 工具写回缓存——这种"Agent 即 LLM"协作模式避免了 API Key 硬编码，并让 prompt 迭代与生成解耦。
 
 ## 技术栈
 
 | 类别 | 内容 |
 |------|------|
-| 主语言 | Python 3.14 |
-| 核心框架 | MCP Python SDK（官方 mcp 包） |
-| 传输协议 | MCP stdio |
-| 关键依赖 | openai（LLM 调用）、jsonschema（参数校验）、json-repair（JSON 修复）、pathspec（gitignore 解析） |
-| 构建工具 | Hatchling（wheel 构建） |
-| 类型检查 | mypy（strict 模式） |
-| 代码检查 | ruff |
-| 测试框架 | pytest + pytest-asyncio |
-| 目标平台 | Windows |
+| 主语言 | Python（>=3.14） |
+| 核心框架 | MCP（Model Context Protocol，stdio 服务） |
+| 关键依赖 | mcp、jsonschema、openai>=2.41.1、json-repair>=0.30、pathspec>=0.12 |
+| 构建工具 | hatchling（wheel 打包，packages=src/codesense_v1） |
+| 类型检查 | mypy（strict，python_version=3.14） |
+| Linter | ruff（line-length=100，规则 E/F/I/B/UP） |
+| 测试框架 | pytest + pytest-asyncio（asyncio_mode=auto，testpaths=tests） |
+| 包管理 | uv（推荐） |
+| 入口 | `codesense = codesense_v1.server:main` |

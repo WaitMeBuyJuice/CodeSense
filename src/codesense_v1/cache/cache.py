@@ -96,14 +96,48 @@ def write_modules_index(
     modules are preserved so per-module invalidation can decide whether to
     regenerate.
 
+    Subgroups defined on existing entries are preserved: if the old index already
+    has ``subgroups`` for a module, they are merged into the new entry (keeping
+    only subgroup items whose files are still present in the module's file list).
+
     Creates *codesense_dir* if it does not exist.
     """
+    # Collect existing subgroups before pruning
+    old_index = read_modules_index(codesense_dir)
+    old_modules: list[dict[str, object]] = []
+    if old_index is not None:
+        raw = old_index.get("modules")
+        if isinstance(raw, list):
+            old_modules = [m for m in raw if isinstance(m, dict)]
+    old_subgroups_map: dict[str, list] = {
+        str(m.get("name", "")): list(m.get("subgroups") or [])
+        for m in old_modules
+    }
+
     new_keys = {safe_key(str(m.get("name", ""))) for m in modules}
     _prune_stale_modules(codesense_dir, new_keys)
     codesense_dir.mkdir(parents=True, exist_ok=True)
+
+    # Merge old subgroups into new module entries
+    merged_modules: list[dict[str, object]] = []
+    for m in modules:
+        m_name = str(m.get("name", ""))
+        old_sgs = old_subgroups_map.get(m_name)
+        if old_sgs:
+            # Only keep subgroup items whose files are still in the module's file list
+            m_files = set(str(f) for f in (m.get("files") or []))
+            cleaned: list[dict] = []
+            for sg in old_sgs:
+                sg_files = [f for f in (sg.get("files") or []) if f in m_files]
+                if sg_files:
+                    cleaned.append({**sg, "files": sg_files})
+            if cleaned:
+                m = {**m, "subgroups": cleaned}
+        merged_modules.append(m)
+
     payload: dict[str, object] = {
         "generated_at": _now_iso(),
-        "modules": modules,
+        "modules": merged_modules,
     }
     if aux_dirs is not None:
         payload["auxiliary_dirs"] = aux_dirs

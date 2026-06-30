@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Final
 
 from codesense_v1 import cache
@@ -51,7 +52,7 @@ _PROJECT_MAP_INPUT_SCHEMA: Final[dict[str, object]] = {
 }
 
 
-def _seg_valid(codesense_dir, seg_id: str, current_hash: str, auto_expire: bool) -> bool:
+def _seg_valid(codesense_dir: Path, seg_id: str, current_hash: str, auto_expire: bool) -> bool:
     if not auto_expire:
         return cache.read_segment(codesense_dir, seg_id) is not None
     return cache.is_segment_valid(codesense_dir, seg_id, current_hash)
@@ -102,7 +103,7 @@ async def project_map(_nonce: str | None = None) -> str:
             "请先在该目录下运行 `codegraph init -i`，完成后重新调用 project_map。"
         )
 
-    auto_expire = is_auto_expire_enabled()
+    auto_expire = is_auto_expire_enabled(project_root)
 
     # ---- Gather data --------------------------------------------------------
     with CodeGraphDB(project_root) as db:

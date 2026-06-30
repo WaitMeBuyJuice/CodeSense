@@ -1,5 +1,5 @@
 from codesense_v1.summarizer.summarizer import (
-    _is_auto_expire_enabled as is_auto_expire_enabled,
+    _is_auto_expire_enabled as _is_auto_expire_enabled_impl,
     _build_symbol_module_map,
     _build_submodule_prompt,
     _compute_submodule_hash,
@@ -19,6 +19,7 @@ from codesense_v1.summarizer.summarizer import (
     save_project_map_segment,
     submit_project_map,
 )
+from codesense_v1.data.config import get_cache_auto_expire as is_auto_expire_enabled
 
 __all__ = [
     "_build_submodule_prompt",

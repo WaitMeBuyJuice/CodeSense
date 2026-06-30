@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 import re
 from pathlib import Path
@@ -18,6 +19,7 @@ from codesense_v1.data.architecture import (
     find_cycles,
     topological_layers,
 )
+from codesense_v1.data.config import get_cache_auto_expire, get_include_dirs
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.docstrings import (
     extract_file_docstring,
@@ -45,8 +47,6 @@ _NAME_MAX_LEN = 20
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
-_INCLUDE_DIRS_ENV = "CODESENSE_INCLUDE_DIRS"
-_CACHE_AUTO_EXPIRE_ENV = "CODESENSE_CACHE_AUTO_EXPIRE"
 _DEFAULT_INCLUDE_ROOTS: tuple[str, ...] = ("src",)
 
 
@@ -105,29 +105,24 @@ def _looks_like_entry_layer(directories: list[str]) -> bool:
     return False
 
 
-def _is_auto_expire_enabled() -> bool:
-    """Return False only when CODESENSE_CACHE_AUTO_EXPIRE is explicitly set to 'false'.
+def _is_auto_expire_enabled(project_root: Path) -> bool:
+    """Return False only when cache_auto_expire is set to false.
 
-    Defaults to True — cache expires when DB hash changes.
-    Set CODESENSE_CACHE_AUTO_EXPIRE=false to always serve stale cache.
+    Reads from .codesense/.codesense_config first; falls back to env
+    CODESENSE_CACHE_AUTO_EXPIRE.  Defaults to True — cache expires when
+    DB hash changes.  Set to false to always serve stale cache.
     """
-    return os.environ.get(_CACHE_AUTO_EXPIRE_ENV, "true").strip().lower() != "false"
+    return get_cache_auto_expire(project_root)
 
 
-def _get_include_roots() -> tuple[str, ...] | None:
+def _get_include_roots(project_root: Path) -> tuple[str, ...] | None:
     """Return user-configured include roots, or ``None`` if not configured.
 
-    Read from ``CODESENSE_INCLUDE_DIRS`` (comma-separated).  ``None`` means
-    "auto-detect from DB"; an explicit empty string also returns ``None``
-    (treated as not configured).
+    Read from .codesense/.codesense_config ``include_dirs`` (list); falls back
+    to env CODESENSE_INCLUDE_DIRS (comma-separated).  ``None`` means
+    "auto-detect from DB".
     """
-    raw = os.environ.get(_INCLUDE_DIRS_ENV, "")
-    parts = [
-        r.strip().replace("\\", "/").rstrip("/")
-        for r in raw.split(",")
-        if r.strip()
-    ]
-    parts = [p for p in parts if p]
+    parts = get_include_dirs(project_root)
     return tuple(parts) if parts else None
 
 
@@ -152,16 +147,17 @@ def _classify_top_dirs(
 
 def _resolve_roots_and_aux(
     all_file_paths: list[str],
+    project_root: Path | None = None,
 ) -> tuple[tuple[str, ...], list[dict[str, object]]]:
     """Return (include_roots, auxiliary_dirs) for the current run.
 
     Priority:
-    1. User-configured ``CODESENSE_INCLUDE_DIRS`` → use as L1 roots;
+    1. User-configured include_dirs (config file / CODESENSE_INCLUDE_DIRS) → use as L1 roots;
        still detect L2 from DB paths under non-configured dirs.
     2. DB has files under ``src/`` → use ``("src",)`` (legacy default).
     3. Auto-detect from DB.
     """
-    user_roots = _get_include_roots()
+    user_roots = _get_include_roots(project_root) if project_root is not None else None
 
     if user_roots:
         # User explicitly configured roots: use them as L1, discover L2 from the rest.
@@ -290,8 +286,10 @@ def _dedup_description(desc: str) -> str:
 def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
     """Return a stable hash representing this module's current content.
 
-    Hash input: sorted file list + sorted symbol fingerprints (file:name:kind:sig).
-    Changes when files are added/removed or any symbol signature changes.
+    Hash input: sorted file list + sorted symbol fingerprints (file:name:kind:sig)
+    + subgroups definition (if any).
+    Changes when files are added/removed, any symbol signature changes, or
+    subgroups definition changes.
     """
     files = sorted(str(f) for f in (entry.get("files") or []))
     file_set = set(files)
@@ -301,7 +299,16 @@ def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
         if fp in file_set:
             symbols.append(f"{fp}:{node.name}:{node.kind}:{node.signature or ''}")
     symbols.sort()
-    content = "\n".join(files + symbols)
+    # Include subgroups definition in hash
+    subgroups = entry.get("subgroups") or []
+    subgroups_str = ""
+    if subgroups:
+        sgs = [
+            (sg.get("name", ""), sg.get("description", ""), sorted(str(f) for f in sg.get("files", [])))
+            for sg in subgroups
+        ]
+        subgroups_str = json.dumps(sorted(sgs, key=lambda x: x[0]), ensure_ascii=False)
+    content = "\n".join(files + symbols) + "\n" + subgroups_str
     return hashlib.sha1(content.encode("utf-8")).hexdigest()  # noqa: S324
 
 
@@ -325,7 +332,7 @@ async def get_project_map_prompt(project_root: Path) -> str:
             f.path.replace("\\", "/"): f.language for f in all_file_rows
         }
 
-    roots, _ = _resolve_roots_and_aux(all_file_paths)
+    roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
     dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
     dir_deps = _filter_dir_deps(dir_deps, roots)
 
@@ -337,7 +344,7 @@ async def get_project_map_prompt(project_root: Path) -> str:
     # Extract docstrings: one per directory (for leaf dirs) + per-file (for parent dirs).
     dir_file_docstrings: dict[str, str] = {}
     file_docstrings: dict[str, str] = {}  # file_path → docstring
-    if _docstrings_enabled():
+    if _docstrings_enabled(project_root):
         all_dirs_set_check = set(dir_syms.keys())
         for d, syms in dir_syms.items():
             is_parent = any(other.startswith(d + "/") for other in all_dirs_set_check if other != d)
@@ -453,7 +460,7 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         dir_syms = directory_symbols(db, max_per_dir=50)
         all_file_paths: list[str] = [f.path.replace("\\", "/") for f in db.iter_files()]
 
-        roots, aux_dirs = _resolve_roots_and_aux(all_file_paths)
+        roots, aux_dirs = _resolve_roots_and_aux(all_file_paths, project_root)
         all_file_paths_l1 = [
             p for p in all_file_paths if any(p.startswith(r + "/") for r in roots)
         ]
@@ -598,7 +605,7 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
     # Extract file and symbol docstrings
     file_docstrings: dict[str, str] = {}
     symbol_docstrings: dict[str, str] = {}
-    if _docstrings_enabled():
+    if _docstrings_enabled(project_root):
         pr = Path(project_root)
         for fp, nodes_list in file_nodes.items():
             lang = nodes_list[0].language if nodes_list else _lang_from_path(fp)
@@ -614,6 +621,15 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
                 if doc:
                     file_docstrings[fp] = doc
 
+    # Build dir/file → module name mapping from modules_index
+    dir_to_module_name: dict[str, str] = {}
+    for m in modules_list:
+        mname = str(m.get("name", ""))
+        for d in (m.get("directories") or []):
+            dir_to_module_name[str(d)] = mname
+        for f in (m.get("files") or []):
+            dir_to_module_name[str(f)] = mname
+
     return _build_module_prompt(
         entry,
         dir_deps,
@@ -623,14 +639,24 @@ async def get_module_prompt(project_root: Path, module_name: str) -> str:
         file_docstrings=file_docstrings,
         symbol_docstrings=symbol_docstrings,
         ref_docs_section=ref_docs_prompt_section(project_root),
+        dir_to_module_name=dir_to_module_name,
     )
 
 
-async def get_submodule_prompt(project_root: Path, module_name: str, file_path: str) -> str:
-    """Return the prompt for generating a file-level sub-module document.
+async def get_submodule_prompt(
+    project_root: Path,
+    module_name: str,
+    file_path: str,
+    subgroup_name: "str | None" = None,
+) -> str:
+    """Return the prompt for generating a file-level or subgroup sub-module document.
+
+    If *subgroup_name* is provided, uses subgroup mode: collects all files in that
+    subgroup, builds a multi-file prompt. Otherwise falls back to single-file mode.
 
     Raises:
-        InvalidArgumentError: if modules_index is missing, module not found, or file not in module.
+        InvalidArgumentError: if modules_index is missing, module not found, or
+            file/subgroup not in module.
         FileNotFoundError: if the CodeGraph DB does not exist.
     """
     codesense_dir = project_root / _CODESENSE_DIR_NAME
@@ -658,12 +684,61 @@ async def get_submodule_prompt(project_root: Path, module_name: str, file_path: 
             f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
         )
 
-    if _is_single_file_module(entry):
-        name = str(entry.get("name", module_name))
-        raise InvalidArgumentError(
-            f"参数错误：模块「{name}」是单文件模块，请使用 get_module_prompt 获取该模块的分析提示词。"
+    if subgroup_name is not None:
+        # Subgroup mode
+        subgroups_raw = entry.get("subgroups") or []
+        sg_entry: dict | None = None
+        for sg in subgroups_raw:
+            if str(sg.get("name", "")) == subgroup_name:
+                sg_entry = sg
+                break
+        if sg_entry is None:
+            available_sgs = [str(sg.get("name", "")) for sg in subgroups_raw]
+            raise InvalidArgumentError(
+                f"参数错误：子模块 '{subgroup_name}' 不存在于模块「{module_name}」。"
+                f"可用子模块：{', '.join(available_sgs)}"
+            )
+        subgroup_files = [str(f).replace("\\", "/") for f in (sg_entry.get("files") or [])]
+        subgroup_description = str(sg_entry.get("description", ""))
+
+        with CodeGraphDB(project_root) as db:
+            file_set = set(subgroup_files)
+            file_nodes = [
+                node
+                for node in db.iter_nodes(kinds=("function", "class", "method"))
+                if node.file_path.replace("\\", "/") in file_set
+            ]
+            node_id_to_file: dict[str, str] = {}
+            for node in db.iter_nodes():
+                node_id_to_file[node.id] = node.file_path.replace("\\", "/")
+
+            out_files_set: set[str] = set()
+            in_files_set: set[str] = set()
+            for edge in db.iter_edges(kinds=("imports", "calls")):
+                src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
+                tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+                if src_file in file_set and edge.kind == "imports" and tgt_file not in file_set:
+                    out_files_set.add(tgt_file)
+                if tgt_file in file_set and edge.kind == "imports" and src_file not in file_set:
+                    in_files_set.add(src_file)
+
+        return _build_submodule_prompt(
+            module_entry=entry,
+            file_path=subgroup_files[0] if subgroup_files else file_path,
+            file_nodes=file_nodes,
+            outbound_edges=[],
+            inbound_edges=[],
+            ref_docs_section=ref_docs_prompt_section(project_root),
+            out_files=sorted(out_files_set),
+            in_files=sorted(in_files_set),
+            out_modules=_map_files_to_modules(sorted(out_files_set), modules_list),
+            in_modules=_map_files_to_modules(sorted(in_files_set), modules_list),
+            subgroup_name=subgroup_name,
+            subgroup_description=subgroup_description,
+            subgroup_files=subgroup_files,
         )
 
+    # Single-file mode (backward compatible)
     files_raw = entry.get("files")
     module_files = [str(f).replace("\\", "/") for f in (files_raw if isinstance(files_raw, list) else [])]
     if file_path not in module_files:
@@ -678,12 +753,12 @@ async def get_submodule_prompt(project_root: Path, module_name: str, file_path: 
             for node in db.iter_nodes(kinds=("function", "class", "method"))
             if node.file_path.replace("\\", "/") == file_path
         ]
-        node_id_to_file: dict[str, str] = {}
+        node_id_to_file = {}
         for node in db.iter_nodes():
             node_id_to_file[node.id] = node.file_path.replace("\\", "/")
 
-        out_files_set: set[str] = set()
-        in_files_set: set[str] = set()
+        out_files_set = set()
+        in_files_set = set()
         for edge in db.iter_edges(kinds=("imports", "calls")):
             src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
             tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
@@ -701,11 +776,22 @@ async def get_submodule_prompt(project_root: Path, module_name: str, file_path: 
         ref_docs_section=ref_docs_prompt_section(project_root),
         out_files=sorted(out_files_set),
         in_files=sorted(in_files_set),
+        out_modules=_map_files_to_modules(sorted(out_files_set), modules_list),
+        in_modules=_map_files_to_modules(sorted(in_files_set), modules_list),
     )
 
 
-def save_module_summary(project_root: Path, module_name: str, summary: str) -> None:
+def save_module_summary(
+    project_root: Path,
+    module_name: str,
+    summary: str,
+    subgroups: "list[dict[str, object]] | None" = None,
+) -> None:
     """Write *summary* to cache for *module_name*, updating per-module hash.
+
+    If *subgroups* is provided (explicit), uses it.
+    Otherwise, tries to parse a ``## subgroups（JSON）`` section from the
+    summary text itself (the LLM may embed it there).
 
     Raises:
         FileNotFoundError: if the CodeGraph DB does not exist.
@@ -739,10 +825,42 @@ def save_module_summary(project_root: Path, module_name: str, summary: str) -> N
             f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
         )
 
+    # Auto-parse subgroups from summary text if not explicitly provided
+    if subgroups is None:
+        subgroups, summary = _extract_subgroups_from_summary(summary)
+
     with CodeGraphDB(project_root) as db:
         module_hash = _compute_module_hash(entry, db)
 
     cache.write_module(codesense_dir, mkey, module_name, summary, current_hash, module_hash)
+
+    if subgroups is not None:
+        # Clean: only keep subgroup items whose files are still in entry["files"]
+        module_files = set(str(f) for f in (entry.get("files") or []))
+        cleaned_subgroups: list[dict] = []
+        for sg in subgroups:
+            sg_files = [f for f in (sg.get("files") or []) if f in module_files]
+            if sg_files:
+                cleaned_subgroups.append({
+                    "name": str(sg.get("name", "")),
+                    "description": str(sg.get("description", "")),
+                    "files": sg_files,
+                })
+        # Update modules_index with new subgroups
+        updated_index = cache.read_modules_index(codesense_dir)
+        if updated_index is not None:
+            updated_modules: list[dict[str, object]] = []
+            for m in (updated_index.get("modules") or []):
+                if isinstance(m, dict) and str(m.get("name", "")).strip().lower() == module_name.strip().lower():
+                    m = dict(m)
+                    m["subgroups"] = cleaned_subgroups
+                updated_modules.append(m)
+            cache.write_modules_index(
+                codesense_dir,
+                updated_modules,
+                current_hash,
+                updated_index.get("auxiliary_dirs"),  # type: ignore[arg-type]
+            )
 
 
 def _parse_modules_text(
@@ -1244,6 +1362,73 @@ def _build_project_map_prompt(
     )
 
 
+def _map_files_to_modules(
+    file_paths: list[str], modules_list: list[dict[str, object]]
+) -> list[str]:
+    """Map file paths to module names using modules_list; deduplicate; sort."""
+    file_to_module: dict[str, str] = {}
+    for m in modules_list:
+        mname = str(m.get("name", ""))
+        for f in (m.get("files") or []):
+            file_to_module[str(f).replace("\\", "/")] = mname
+    module_names: set[str] = set()
+    for fp in file_paths:
+        fp_norm = fp.replace("\\", "/")
+        module_names.add(file_to_module.get(fp_norm, fp_norm.split("/")[-1]))
+    return sorted(module_names)
+
+
+def _build_subgroups_section(entry: dict[str, object]) -> str:
+    """Build the subgroups data section string for inclusion in the module prompt."""
+    subgroups_raw = entry.get("subgroups")
+    if subgroups_raw:
+        sg_lines = ["### 已定义子模块划分（subgroups）"]
+        for sg in subgroups_raw:
+            sg_name = sg.get("name", "")
+            sg_desc = sg.get("description", "")
+            sg_files = sg.get("files", [])
+            sg_lines.append(f"- **{sg_name}**：{sg_desc}（文件：{', '.join(sg_files)}）")
+        return "\n".join(sg_lines)
+    else:
+        return "### 已定义子模块划分（subgroups）\n（尚未定义，请在输出时自行划分并按格式输出 subgroups JSON）"
+
+
+def _extract_subgroups_from_summary(
+    summary: str,
+) -> "tuple[list[dict[str, object]] | None, str]":
+    """Parse optional ``## subgroups（JSON）`` section from summary text.
+
+    Returns (subgroups_list_or_None, cleaned_summary_without_the_section).
+    """
+    import re as _re
+
+    # Match: ## subgroups（JSON）\n<content until next ## heading or end>
+    pattern = _re.compile(
+        r"\n?##\s*subgroups[（(]JSON[）)]\s*\n(.*?)(?=\n##\s|\Z)",
+        _re.DOTALL | _re.IGNORECASE,
+    )
+    match = pattern.search(summary)
+    if not match:
+        return None, summary
+
+    raw = match.group(1).strip()
+    # Strip markdown code fences if present
+    raw = _re.sub(r"^```[a-z]*\n?", "", raw, flags=_re.MULTILINE)
+    raw = _re.sub(r"\n?```$", "", raw, flags=_re.MULTILINE)
+    raw = raw.strip()
+
+    subgroups: list[dict[str, object]] | None = None
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            subgroups = [sg for sg in parsed if isinstance(sg, dict)]
+    except Exception:  # noqa: BLE001
+        pass  # malformed JSON — treat as if not present
+
+    cleaned = pattern.sub("", summary).rstrip()
+    return subgroups, cleaned
+
+
 def _build_module_prompt(
     entry: dict[str, object],
     dir_deps: dict[str, dict[str, list[str]]],
@@ -1254,6 +1439,7 @@ def _build_module_prompt(
     file_docstrings: dict[str, str] | None = None,
     symbol_docstrings: dict[str, str] | None = None,
     ref_docs_section: str = "",
+    dir_to_module_name: dict[str, str] | None = None,
 ) -> str:
     name = str(entry.get("name", ""))
     description = str(entry.get("description", ""))
@@ -1308,8 +1494,15 @@ def _build_module_prompt(
         file_lines.append(f"- `{f}`" + (f"  — [文件注释] {fdoc}" if fdoc else ""))
     files_txt = "\n".join(file_lines) or "（无）"
 
-    outbound_txt = "\n".join(f"- `{d}`" for d in sorted(outbound)) or "（无）"
-    inbound_txt = "\n".join(f"- `{d}`" for d in sorted(inbound)) or "（无）"
+    # Helper: map directory/file path → module name (fallback to last path segment)
+    def _to_module_label(d: str) -> str:
+        if dir_to_module_name:
+            if d in dir_to_module_name:
+                return dir_to_module_name[d]
+        return d.split("/")[-1]
+
+    outbound_txt = "\n".join(f"- `{_to_module_label(d)}`" for d in sorted(outbound)) or "（无）"
+    inbound_txt = "\n".join(f"- `{_to_module_label(d)}`" for d in sorted(inbound)) or "（无）"
 
     # Graph-derived public API (cross-directory imports, language-agnostic)
     if public_symbols:
@@ -1350,25 +1543,37 @@ def _build_module_prompt(
         "## 架构简析\n"
         "（描述模块内部分层，如「入口→核心→辅助」，各层包含哪些文件；单文件模块简述职责即可）\n\n"
         "## 子模块列表\n"
-        "（表格，3 列：子模块名 | 作用 | 路径；**不含 `__init__.py`**；"
-        "子模块名格式为 `<模块名>_<文件basename去扩展名>`，如 `data_db`；"
-        "单文件模块只有一行）\n\n"
+        "（表格，3 列：子模块名 | 职责 | 包含文件；\n"
+        "  **重要**：按「业务职责」划分，不要机械地每个文件单独一组；\n"
+        "  职责相近的文件应合并到同一子模块，目标 2-5 个子模块；\n"
+        "  职责独立的文件单独成一个子模块也完全合理；\n"
+        "  若已有 subgroups 定义（见下方数据），以 subgroups 为准生成此表格；\n"
+        "  若无 subgroups，按业务职责自行划分，**不含 `__init__.py`**；\n"
+        "  子模块名格式：`<模块名>_<职责简短标识>`，如 `data_storage`；单文件模块只有一行）\n\n"
         "## 上下游关系\n"
-        "（「上游」= 依赖此模块的目录；「下游」= 此模块依赖的目录；数据来自 imports 边，置信度 extracted）\n\n"
+        "（「上游」= 依赖此模块的模块；「下游」= 此模块依赖的模块；数据来自 imports 边，置信度 extracted）\n\n"
         "## 实现约束清单\n"
         "（边界行为、踩坑点、禁忌；**只写模块内部约束**，跨模块架构禁忌在 project_map 04_constraints 已有，此处不重复）\n\n"
+        "## subgroups（JSON）\n"
+        "（**每次生成子模块列表后都必须输出此段**，用于持久化子模块划分；\n"
+        "  格式：JSON 数组，每项有 name/description/files 三个字段；\n"
+        "  files 必须是完整的项目相对路径（与上方「包含文件」一致）；\n"
+        "  直接输出 JSON，不要包裹在代码块中；\n"
+        "  示例：[{\"name\":\"data_storage\",\"description\":\"SQLite只读边界\",\"files\":[\"src/a/db.py\"]}]）\n\n"
         "---\n\n"
         "## 模块数据（参考，不要在输出中重复这些原始数据）\n\n"
         f"### 模块名称\n{name}\n\n"
         f"### project_map 中的初步描述\n{description}\n\n"
         f"### 包含文件\n{files_txt}\n\n"
+        + _build_subgroups_section(entry)
+        + "\n\n"
         f"### 被其他目录 import 的公开符号（图推导，仅作参考）\n"
         f"{pub_api_txt}\n\n"
         f"### 外部依赖库（该模块直接引入的第三方/标准库）\n"
         f"{ext_deps_txt}\n\n"
         f"### 模块内符号（函数/类/方法，含签名）\n{symbols_txt}\n\n"
-        f"### 上游依赖（该模块依赖的目录）\n{outbound_txt}\n\n"
-        f"### 下游依赖（依赖该模块的目录）\n{inbound_txt}\n"
+        f"### 上游依赖（该模块依赖的模块）\n{outbound_txt}\n\n"
+        f"### 下游依赖（依赖该模块的模块）\n{inbound_txt}\n"
         + (f"\n## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
         + f"{_DATA_TRUST_NOTICE}"
     )
@@ -1533,27 +1738,32 @@ def render_dependencies_segment(
 # ---------- submodule helpers ------------------------------------------------
 
 
-def _compute_submodule_hash(file_path: str, db: "CodeGraphDB") -> str:
-    """Hash 单文件的 nodes 指纹 + 出边 imports 集合（基于文件路径）。"""
-    # Build node-id → file mapping for edge resolution
+def _compute_submodule_hash(file_paths: "list[str] | str", db: "CodeGraphDB") -> str:
+    """Hash subgroup 多文件的 nodes + 跨模块 imports/calls 边。
+
+    file_paths: 单个文件路径（str）或文件路径列表（list[str]）。
+    """
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+    file_set = set(fp.replace("\\", "/") for fp in file_paths)
+
     node_id_to_file: dict[str, str] = {}
     for node in db.iter_nodes():
         node_id_to_file[node.id] = node.file_path.replace("\\", "/")
 
     parts: list[str] = []
-    for node in sorted(
-        db.iter_nodes(kinds=("function", "class", "method")),
-        key=lambda n: (n.name, n.kind),
-    ):
-        if node.file_path.replace("\\", "/") == file_path:
+    # Sorted file list for stability
+    parts.append("files:" + ",".join(sorted(file_set)))
+    # Nodes in these files
+    for node in sorted(db.iter_nodes(kinds=("function", "class", "method")), key=lambda n: (n.name, n.kind)):
+        if node.file_path.replace("\\", "/") in file_set:
             parts.append(f"{node.name}:{node.kind}:{node.signature or ''}")
-    for edge in sorted(
-        db.iter_edges(kinds=("imports", "calls")),
-        key=lambda e: (e.source, e.target),
-    ):
+    # Cross-module edges (source OR target in file_set, but not both)
+    for edge in sorted(db.iter_edges(kinds=("imports", "calls")), key=lambda e: (e.source, e.target)):
         src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
-        if src_file == file_path and edge.kind in ("imports", "calls"):
-            tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+        tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+        # Include edge if exactly one endpoint is in file_set (cross-module)
+        if (src_file in file_set) != (tgt_file in file_set):
             parts.append(f"edge:{edge.kind}:{src_file}->{tgt_file}")
     return hashlib.sha1("\n".join(parts).encode()).hexdigest()  # noqa: S324
 
@@ -1574,14 +1784,16 @@ def _build_submodule_prompt(
     *,
     out_files: list[str] | None = None,
     in_files: list[str] | None = None,
+    out_modules: list[str] | None = None,
+    in_modules: list[str] | None = None,
+    subgroup_name: "str | None" = None,
+    subgroup_description: "str | None" = None,
+    subgroup_files: "list[str] | None" = None,
 ) -> str:
-    """构造单文件子模块摘要的 LLM prompt。
+    """构造子模块摘要的 LLM prompt。
 
-    outbound_edges / inbound_edges 是 EdgeRow 列表。EdgeRow.source/target 是 node id，
-    所以调用方应通过 out_files / in_files 参数直接传入已解析的文件路径列表，
-    避免依赖 edge.target 作为文件路径。
-    若 out_files / in_files 未提供，则尝试直接从 edge.target / edge.source 获取
-    （仅在 source/target 本身已是文件路径时正确）。
+    out_modules / in_modules: 文件路径已映射的模块名列表（推荐传入，避免 LLM 自行推断）。
+    若未提供则 fallback 到 out_files / in_files（文件路径）。
     """
     module_name = module_entry.get("name", "")
     file_name = file_path.split("/")[-1]
@@ -1597,6 +1809,10 @@ def _build_submodule_prompt(
         if n.kind in ("function", "class", "method")
     ]
 
+    # Use module names if provided, else fall back to file paths
+    resolved_out_modules = out_modules or []
+    resolved_in_modules = in_modules or []
+    # Keep file paths for raw data section (reference)
     resolved_out = (
         sorted(out_files)
         if out_files is not None
@@ -1608,10 +1824,20 @@ def _build_submodule_prompt(
         else sorted({e.source for e in inbound_edges if e.kind == "imports"})
     )
 
+    # Header: subgroup mode vs single-file mode
+    if subgroup_name is not None:
+        sg_files_str = ", ".join(subgroup_files or [])
+        header_line = (
+            f"模块：`{module_name}`  子模块：`{subgroup_name}`  职责：{subgroup_description or ''}\n"
+            f"包含文件：{sg_files_str}"
+        )
+    else:
+        header_line = f"模块：`{module_name}`  文件：`{file_name}`  路径：`{file_path}`"
+
     lines = [
         "# 子模块文档生成任务",
         "",
-        f"模块：`{module_name}`  文件：`{file_name}`  路径：`{file_path}`",
+        header_line,
         "",
         "## 全部符号",
         "\n".join(all_symbols) or "（无）",
@@ -1619,11 +1845,15 @@ def _build_submodule_prompt(
         "## 对外接口候选（非下划线开头）",
         "\n".join(public_symbols) or "（无公开符号，请在输出中注明「仅供内部调用」）",
         "",
-        "## 出向依赖文件（imports）",
-        "\n".join(f"- `{f}`" for f in resolved_out) or "（无）",
+        "## 跨模块依赖（已映射为模块名）",
+        "下游（此子模块依赖的模块）：",
+        "\n".join(f"- `{m}`" for m in resolved_out_modules) or "（无）",
         "",
-        "## 入向依赖文件（被哪些文件 import）",
-        "\n".join(f"- `{f}`" for f in resolved_in) or "（无）",
+        "上游（依赖此子模块的模块）：",
+        "\n".join(f"- `{m}`" for m in resolved_in_modules) or "（无）",
+        "",
+        "（参考：原始出向文件）",
+        "\n".join(f"- `{f}`" for f in resolved_out) or "（无）",
     ]
     if ref_docs_section:
         lines += ["", "## 参考文档", ref_docs_section]
@@ -1634,30 +1864,49 @@ def _build_submodule_prompt(
         "",
         "请基于以上数据生成子模块文档，格式如下（严格输出 Markdown，不要输出其他内容）：",
         "",
-        "## 文件概述",
-        "（2-3 句话说明该文件的职责）",
+        "## 子模块概述",
+        "（2-3 句话说明该子模块的业务职责）",
         "",
-        "## 对外接口",
-        "（列表：函数/类名 + 签名 + 一句话说明；若无公开接口则写「仅供内部调用」）",
+        "## 对外能力",
+        "（该子模块对外提供什么能力；",
+        "  内部工具模块：描述关键类/函数的用途，不列函数签名；",
+        "  接口模块：以表格列出 API 端点/MCP 工具名/事件，格式自行选择；",
+        "  完全内部模块：写「仅供模块内部调用」）",
         "",
         "## 跨模块依赖",
-        "（出向：该文件依赖的外部模块文件；入向：依赖该文件的外部模块文件）",
+        "（直接使用上方「跨模块依赖（已映射为模块名）」中的数据；",
+        "  格式：「下游：X, Y」「上游：A, B」；无则写「无」）",
         "",
         "## 典型调用链",
-        "（2-3 条关键调用链，格式：`调用者` → `被调用者`；数据不足可省略）",
+        "（2-3 条关键调用路径，每条用三级标题命名，下方简短描述；数据不足可省略）",
+        "### 调用链名称",
+        "描述……",
     ]
     return "\n".join(lines)
 
 
-def save_submodule_summary(project_root: Path, module_name: str, file_path: str, summary: str) -> None:
-    """保存子模块文档到 .codesense/modules/<module>/<file>.md。
+def save_submodule_summary(
+    project_root: Path,
+    module_name: str,
+    file_path: str,
+    summary: str,
+    subgroup_name: "str | None" = None,
+) -> None:
+    """保存子模块文档到 .codesense/modules/<module>/<key>.md。
+
+    如果提供 subgroup_name，则使用 subgroup 模式：
+    - file_key = "<module_key>_<subgroup_name>"
+    - hash 基于 subgroup 的所有文件
+
+    否则使用文件模式（保持向后兼容）：
+    - file_key = "<module_key>_<basename_no_ext>"
+    - hash 基于单文件
 
     Raises:
         FileNotFoundError: if the CodeGraph DB does not exist.
         InvalidArgumentError: if modules_index is missing or module_name not found.
     """
     codesense_dir = project_root / _CODESENSE_DIR_NAME
-    db_path = project_root / ".codegraph" / "codegraph.db"
 
     index = cache.read_modules_index(codesense_dir)
     if index is None:
@@ -1683,13 +1932,32 @@ def save_submodule_summary(project_root: Path, module_name: str, file_path: str,
         )
 
     module_key = cache.safe_key(module_name)
-    # file_path 形如 "src/codesense_v1/cache/cache.py"，取末段去扩展名
-    basename = file_path.rstrip("/").split("/")[-1]
-    basename_no_ext = basename.rsplit(".", 1)[0]
-    file_key = f"{module_key}_{basename_no_ext}"
 
-    with CodeGraphDB(project_root) as db:
-        submodule_hash = _compute_submodule_hash(file_path, db)
+    if subgroup_name is not None:
+        # Subgroup mode
+        subgroups_raw = entry.get("subgroups") or []
+        sg_entry: dict | None = None
+        for sg in subgroups_raw:
+            if str(sg.get("name", "")) == subgroup_name:
+                sg_entry = sg
+                break
+        if sg_entry is None:
+            available_sgs = [str(sg.get("name", "")) for sg in subgroups_raw]
+            raise InvalidArgumentError(
+                f"参数错误：子模块 '{subgroup_name}' 不存在于模块「{module_name}」。"
+                f"可用子模块：{', '.join(available_sgs)}"
+            )
+        subgroup_files = [str(f) for f in (sg_entry.get("files") or [])]
+        file_key = f"{module_key}_{subgroup_name}"
+        with CodeGraphDB(project_root) as db:
+            submodule_hash = _compute_submodule_hash(subgroup_files, db)
+    else:
+        # File mode (backward compatible)
+        basename = file_path.rstrip("/").split("/")[-1]
+        basename_no_ext = basename.rsplit(".", 1)[0]
+        file_key = f"{module_key}_{basename_no_ext}"
+        with CodeGraphDB(project_root) as db:
+            submodule_hash = _compute_submodule_hash(file_path, db)
 
     cache.write_submodule(codesense_dir, module_key, file_key, summary, submodule_hash)
 

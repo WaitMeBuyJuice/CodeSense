@@ -18,14 +18,18 @@ _SCHEMA: Final[dict[str, object]] = {
         },
         "file_path": {
             "type": "string",
-            "description": "模块内某个文件的相对路径（如 src/codesense_v1/cache/cache.py）",
+            "description": "（文件模式）模块内某个文件的相对路径（如 src/codesense_v1/cache/cache.py）。与 subgroup_name 二选一。",
+        },
+        "subgroup_name": {
+            "type": "string",
+            "description": "（subgroup 模式）子模块名，如 data_storage。与 file_path 二选一，优先使用。",
         },
         "summary": {
             "type": "string",
             "description": "子模块文档 Markdown 文本",
         },
     },
-    "required": ["module_name", "file_path", "summary"],
+    "required": ["module_name", "summary"],
     "additionalProperties": False,
 }
 
@@ -33,23 +37,28 @@ _SCHEMA: Final[dict[str, object]] = {
 @tool(
     name="save_submodule_summary",
     description=(
-        "将子模块（文件级）文档写入缓存，后续 explore_submodule 调用将直接返回该内容。\n\n"
+        "将子模块文档写入缓存，后续 explore_submodule 调用将直接返回该内容。\n\n"
         "仅在 explore_submodule 返回生成步骤引导时使用，通常委派给子 Agent 执行。\n"
         "正常使用时无需主动调用本工具。\n\n"
         "module_name 必须是 project_map 返回的模块名之一。\n"
-        "file_path 为该模块内文件的相对路径。\n"
+        "有 subgroups 时传 subgroup_name；无 subgroups 时传 file_path（文件模式，向后兼容）。\n"
         "保存成功后，主 Agent 重新调用 explore_submodule 即可获取子模块文档。"
     ),
     input_schema=_SCHEMA,
 )
-async def save_submodule_summary_tool(module_name: str, file_path: str, summary: str) -> str:
+async def save_submodule_summary_tool(
+    module_name: str,
+    summary: str,
+    file_path: str = "",
+    subgroup_name: str | None = None,
+) -> str:
     module_name = module_name.strip()
     file_path = file_path.strip().replace("\\", "/")
 
     if not module_name:
         raise InvalidArgumentError("参数错误：module_name 不能为空")
-    if not file_path:
-        raise InvalidArgumentError("参数错误：file_path 不能为空")
+    if subgroup_name is None and not file_path:
+        raise InvalidArgumentError("参数错误：file_path 和 subgroup_name 至少提供一个")
     if not summary.strip():
         raise InvalidArgumentError("参数错误：summary 不能为空")
 
@@ -58,15 +67,26 @@ async def save_submodule_summary_tool(module_name: str, file_path: str, summary:
         return project_root_not_found_error()
 
     try:
-        summarizer.save_submodule_summary(project_root, module_name, file_path, summary)
-        basename = file_path.split("/")[-1]
-        basename_no_ext = basename.rsplit(".", 1)[0]
-        from codesense_v1 import cache
-        module_key = cache.safe_key(module_name)
-        file_key = f"{module_key}_{basename_no_ext}"
+        summarizer.save_submodule_summary(
+            project_root,
+            module_name,
+            file_path,
+            summary,
+            subgroup_name=subgroup_name,
+        )
+        from codesense_v1 import cache as _cache
+        module_key = _cache.safe_key(module_name)
+        if subgroup_name is not None:
+            file_key = f"{module_key}_{subgroup_name}"
+            label = f"子模块 '{subgroup_name}'"
+        else:
+            basename = file_path.split("/")[-1]
+            basename_no_ext = basename.rsplit(".", 1)[0]
+            file_key = f"{module_key}_{basename_no_ext}"
+            label = f"文件 '{file_path}'"
         write_path = f".codesense/modules/{module_key}/{file_key}.md"
         return (
-            f"已保存模块 '{module_name}' 中文件 '{file_path}' 的子模块文档"
+            f"已保存模块 '{module_name}' 中{label}的子模块文档"
             f"（{len(summary)} 字符）。\n"
             f"写入路径：`{write_path}`"
         )

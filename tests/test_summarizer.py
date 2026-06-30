@@ -246,25 +246,25 @@ def test_leaf_dirs_from_files_ignores_top_level_files() -> None:
 # ---- include-roots filter (CODESENSE_INCLUDE_DIRS) --------------------------
 
 
-def test_get_include_roots_default(monkeypatch: Any) -> None:
+def test_get_include_roots_default(monkeypatch: Any, tmp_path: Any) -> None:
     from codesense_v1.summarizer.summarizer import _get_include_roots
 
     monkeypatch.delenv("CODESENSE_INCLUDE_DIRS", raising=False)
-    assert _get_include_roots() is None
+    assert _get_include_roots(tmp_path) is None
 
 
-def test_get_include_roots_from_env(monkeypatch: Any) -> None:
+def test_get_include_roots_from_env(monkeypatch: Any, tmp_path: Any) -> None:
     from codesense_v1.summarizer.summarizer import _get_include_roots
 
     monkeypatch.setenv("CODESENSE_INCLUDE_DIRS", "src, scripts , app/")
-    assert _get_include_roots() == ("src", "scripts", "app")
+    assert _get_include_roots(tmp_path) == ("src", "scripts", "app")
 
 
-def test_get_include_roots_empty_env_falls_back(monkeypatch: Any) -> None:
+def test_get_include_roots_empty_env_falls_back(monkeypatch: Any, tmp_path: Any) -> None:
     from codesense_v1.summarizer.summarizer import _get_include_roots
 
     monkeypatch.setenv("CODESENSE_INCLUDE_DIRS", "   ,  ")
-    assert _get_include_roots() is None
+    assert _get_include_roots(tmp_path) is None
 
 
 def test_is_under_roots_matches_root_and_nested() -> None:

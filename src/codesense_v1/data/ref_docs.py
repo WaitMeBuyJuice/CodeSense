@@ -1,15 +1,21 @@
 """Reference document discovery for CodeSense.
 
-Scans a user-configured directory for project reference documents (requirements,
+Scans user-configured paths for project reference documents (requirements,
 design specs, feature docs, etc.) and returns their paths so that prompts can
 instruct the Agent to read them as supplementary context.
 
-Control via environment variable
----------------------------------
-``CODESENSE_REF_DOCS_DIR``
-    Absolute or project-relative path to the reference documents folder.
-    When unset or pointing to a non-existent directory, discovery returns an
-    empty list and no reference-docs section is added to prompts.
+Control via .codesense/.codesense_config
+-----------------------------------------
+``ref_docs.paths``
+    List of absolute or project-relative paths (files or directories).
+    When a path is a directory, its files are scanned (recursive depending on
+    ``ref_docs.recursive``).  When a path is a file, it is added directly.
+
+``ref_docs.recursive``
+    Boolean (default ``false``).  When ``true``, directory entries are scanned
+    recursively.
+
+Fallback: env ``CODESENSE_REF_DOCS_DIR`` (single directory, backward compat).
 
 Supported file types
 ---------------------
@@ -18,17 +24,13 @@ Supported file types
 - PDF:         ``.pdf``   (path only — content not extracted)
 
 Only regular files are collected (symlinks and directories are skipped).
-The scan is non-recursive by default; set ``CODESENSE_REF_DOCS_RECURSIVE=true``
-to include sub-directories.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-_REF_DOCS_DIR_ENV = "CODESENSE_REF_DOCS_DIR"
-_REF_DOCS_RECURSIVE_ENV = "CODESENSE_REF_DOCS_RECURSIVE"
+from codesense_v1.data.config import get_ref_docs_paths, get_ref_docs_recursive
 
 _TEXT_EXTENSIONS: frozenset[str] = frozenset(
     {".md", ".txt", ".rst", ".adoc", ".markdown"}
@@ -37,39 +39,42 @@ _BINARY_EXTENSIONS: frozenset[str] = frozenset({".docx", ".pdf"})
 _ALL_EXTENSIONS: frozenset[str] = _TEXT_EXTENSIONS | _BINARY_EXTENSIONS
 
 
-def _ref_docs_dir(project_root: Path) -> Path | None:
-    """Return the resolved reference-docs directory, or ``None`` if not configured."""
-    raw = os.environ.get(_REF_DOCS_DIR_ENV, "").strip()
-    if not raw:
-        return None
-    p = Path(raw)
-    if not p.is_absolute():
-        p = project_root / p
-    p = p.resolve()
-    return p if p.is_dir() else None
-
-
-def _is_recursive() -> bool:
-    return os.environ.get(_REF_DOCS_RECURSIVE_ENV, "").strip().lower() == "true"
-
-
 def discover_ref_docs(project_root: Path) -> list[Path]:
-    """Return a sorted list of reference-document paths under the configured directory.
+    """Return a sorted list of reference-document paths under the configured paths.
 
-    Returns an empty list when ``CODESENSE_REF_DOCS_DIR`` is unset or the
-    directory does not exist.  Each returned path is an absolute ``Path``.
+    Returns an empty list when no paths are configured or none resolve to
+    existing files/directories.  Each returned path is an absolute ``Path``.
     """
-    docs_dir = _ref_docs_dir(project_root)
-    if docs_dir is None:
+    raw_paths = get_ref_docs_paths(project_root)
+    if not raw_paths:
         return []
 
-    recursive = _is_recursive()
+    recursive = get_ref_docs_recursive(project_root)
     pattern = "**/*" if recursive else "*"
+
     files: list[Path] = []
-    for p in sorted(docs_dir.glob(pattern)):
-        if p.is_file() and p.suffix.lower() in _ALL_EXTENSIONS:
-            files.append(p.resolve())
-    return files
+    for raw in raw_paths:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = project_root / p
+        p = p.resolve()
+
+        if p.is_file():
+            if p.suffix.lower() in _ALL_EXTENSIONS:
+                files.append(p)
+        elif p.is_dir():
+            for child in sorted(p.glob(pattern)):
+                if child.is_file() and child.suffix.lower() in _ALL_EXTENSIONS:
+                    files.append(child.resolve())
+
+    # Deduplicate while preserving order
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for f in files:
+        if f not in seen:
+            seen.add(f)
+            result.append(f)
+    return result
 
 
 def ref_docs_prompt_section(project_root: Path) -> str:

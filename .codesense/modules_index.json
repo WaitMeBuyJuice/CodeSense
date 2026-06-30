@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T07:50:34.775152+00:00",
+  "generated_at": "2026-06-30T06:25:33.276835+00:00",
   "modules": [
     {
       "name": "errors",
@@ -18,6 +18,15 @@
       "files": [
         "src/codesense_v1/cache/__init__.py",
         "src/codesense_v1/cache/cache.py"
+      ],
+      "subgroups": [
+        {
+          "name": "cache_storage",
+          "description": ".codesense 缓存读写、哈希校验与失效",
+          "files": [
+            "src/codesense_v1/cache/cache.py"
+          ]
+        }
       ]
     },
     {
@@ -38,6 +47,42 @@
         "src/codesense_v1/data/project_info.py",
         "src/codesense_v1/data/ref_docs.py",
         "src/codesense_v1/data/structure.py"
+      ],
+      "subgroups": [
+        {
+          "name": "data_codegraph",
+          "description": "CodeGraph SQLite 只读访问与图聚合/架构特征计算",
+          "files": [
+            "src/codesense_v1/data/db.py",
+            "src/codesense_v1/data/aggregate.py",
+            "src/codesense_v1/data/architecture.py"
+          ]
+        },
+        {
+          "name": "data_extraction",
+          "description": "源码文件级依赖边与 docstring 提取",
+          "files": [
+            "src/codesense_v1/data/modules.py",
+            "src/codesense_v1/data/docstrings.py"
+          ]
+        },
+        {
+          "name": "data_project_meta",
+          "description": "项目身份信息（README/配置/包 docstring）与参考文档发现",
+          "files": [
+            "src/codesense_v1/data/project_info.py",
+            "src/codesense_v1/data/ref_docs.py"
+          ]
+        },
+        {
+          "name": "data_structure",
+          "description": "文件树/目录分类与缓存失效哈希",
+          "files": [
+            "src/codesense_v1/data/files.py",
+            "src/codesense_v1/data/structure.py",
+            "src/codesense_v1/data/hashes.py"
+          ]
+        }
       ]
     },
     {
@@ -94,6 +139,39 @@
         "src/codesense_v1/tools/save_module_summary.py",
         "src/codesense_v1/tools/save_project_map_segment.py",
         "src/codesense_v1/tools/submit_project_map.py"
+      ],
+      "subgroups": [
+        {
+          "name": "tools_read",
+          "description": "读类 MCP 工具：缓存命中判断、miss 时内嵌 prompt 返回引导 Agent 生成",
+          "files": [
+            "src/codesense_v1/tools/project_map.py",
+            "src/codesense_v1/tools/explore_module.py"
+          ]
+        },
+        {
+          "name": "tools_write",
+          "description": "写回 MCP 工具：将 Agent 生成的摘要/段落/模块划分持久化到 cache",
+          "files": [
+            "src/codesense_v1/tools/save_module_summary.py",
+            "src/codesense_v1/tools/save_project_map_segment.py",
+            "src/codesense_v1/tools/submit_project_map.py"
+          ]
+        },
+        {
+          "name": "tools_root",
+          "description": "共享辅助：项目根目录三级回退解析（env var → MCP roots → CWD 搜索）",
+          "files": [
+            "src/codesense_v1/tools/_project_root.py"
+          ]
+        },
+        {
+          "name": "tools_init",
+          "description": "注册入口：导入所有工具子模块触发 @tool 注册",
+          "files": [
+            "src/codesense_v1/tools/__init__.py"
+          ]
+        }
       ]
     }
   ],

@@ -32,10 +32,11 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
     name="explore_module",
     description=(
         "返回指定模块的深度架构理解，包括：\n"
-        "- 一句话描述模块职责\n"
-        "- 对外接口（函数、类及签名）\n"
-        "- 内部文件列表及各文件职责\n"
-        "- 上游/下游依赖模块\n\n"
+        "- 一句话定位\n"
+        "- 架构简析（模块内部分层）\n"
+        "- 子模块列表（子模块名 | 职责 | 包含文件）\n"
+        "- 上下游依赖\n"
+        "- 实现约束清单\n\n"
         "当用户希望：\n"
         "- 了解某功能的实现\n"
         "- 修改某个功能，修改某个模块\n"
@@ -45,14 +46,12 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "不确定有哪些模块时，先调用 project_map 获取模块列表，不要猜测名称。\n\n"
         "不适用场景：\n"
         "- 只需知道功能属于哪个模块（使用 project_map）\n"
-        "- 需要查看具体函数实现或调用链（使用 CodeGraph 工具或 grep）\n\n"
+        "- 需要查看具体子模块实现（使用 explore_submodule）\n\n"
         "返回模块级架构描述，不含具体代码实现。\n"
         "若缓存未就绪，工具会返回生成步骤，引导完成后重新调用。\n\n"
         "示例：\n"
-        "- 用户问「缓存管理的作用？」→ explore_module(module_name=\"缓存管理\")\n"
-        "- 用户问「缓存管理模块是怎么实现的？」→ explore_module(module_name=\"缓存管理\")\n"
-        "- 用户问「数据层有哪些对外接口？」→ explore_module(module_name=\"数据层\")\n"
-        "- 准备修改某模块前 → 先 explore_module 该模块了解边界"
+        "- 用户问「cache 模块的作用？」→ explore_module(module_name=\"cache\")\n"
+        "- 准备修改某模块前 → 先 explore_module 了解边界和约束"
     ),
     input_schema=_EXPLORE_MODULE_INPUT_SCHEMA,
 )
@@ -140,7 +139,7 @@ async def explore_module(module_name: str) -> str:
 
     cached_md = cache.read_module(codesense_dir, mkey)
     stored_hashes = cache.read_module_hashes(codesense_dir)
-    if is_auto_expire_enabled():
+    if is_auto_expire_enabled(project_root):
         module_cache_valid = cached_md is not None and stored_hashes.get(mkey) == current_module_hash
     else:
         module_cache_valid = cached_md is not None

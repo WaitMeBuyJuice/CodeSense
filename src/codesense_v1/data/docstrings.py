@@ -20,21 +20,21 @@ Supported languages and their docstring conventions
 - **Erlang**:          consecutive ``%%`` line comments.
 - **Ruby / Shell**:    consecutive ``#`` line comments.
 
-Control via environment variable
----------------------------------
-Set ``CODESENSE_EXTRACT_DOCSTRINGS=false`` to disable all extraction (e.g.
+Control via .codesense/.codesense_config
+-----------------------------------------
+Set ``extract_docstrings: false`` to disable all extraction (e.g.
 for projects whose source files are not accessible at summary time).
+Fallback: env ``CODESENSE_EXTRACT_DOCSTRINGS=false``.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
+from codesense_v1.data.config import get_extract_docstrings
 from codesense_v1.data.db import NodeRow
 
-_DOCSTRING_ENV = "CODESENSE_EXTRACT_DOCSTRINGS"
 _MAX_LEN = 200            # maximum characters per docstring (first line only)
 _LOOKAHEAD = 10           # lines after start_line to search (Python body)
 _LOOKBEHIND = 20          # lines before start_line to search (comment-before langs)
@@ -45,9 +45,20 @@ _FILE_SCAN = 30           # max lines to scan for file-level docstring
 # ---------------------------------------------------------------------------
 
 
-def is_enabled() -> bool:
-    """Return True unless ``CODESENSE_EXTRACT_DOCSTRINGS`` is set to ``false``."""
-    return os.environ.get(_DOCSTRING_ENV, "true").strip().lower() != "false"
+def is_enabled(project_root: Path | None = None) -> bool:
+    """Return True unless extract_docstrings is set to false.
+
+    Reads from .codesense/.codesense_config first; falls back to env
+    ``CODESENSE_EXTRACT_DOCSTRINGS`` for backward compatibility.
+
+    When *project_root* is ``None`` the function falls back to env only
+    (for call-sites that have not yet been updated).
+    """
+    if project_root is not None:
+        return get_extract_docstrings(project_root)
+    # Legacy env-only path (backward compat)
+    import os
+    return os.environ.get("CODESENSE_EXTRACT_DOCSTRINGS", "true").strip().lower() != "false"
 
 
 # ---------------------------------------------------------------------------
