@@ -145,7 +145,11 @@ async def explore_submodule(
             )
 
         subgroup_files = [str(f).replace("\\", "/") for f in (sg_entry.get("files") or [])]
-        file_key = f"{mkey}_{subgroup_name}"
+        file_key = (
+            subgroup_name
+            if subgroup_name.startswith(mkey + "_")
+            else f"{mkey}_{subgroup_name}"
+        )
 
         with CodeGraphDB(project_root) as db:
             current_hash = _compute_submodule_hash(subgroup_files, db)

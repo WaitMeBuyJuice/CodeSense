@@ -2142,7 +2142,13 @@ def save_submodule_summary(
                 f"可用子模块：{', '.join(available_sgs)}"
             )
         subgroup_files = [str(f) for f in (sg_entry.get("files") or [])]
-        file_key = f"{module_key}_{subgroup_name}"
+        # Avoid double-prefix: if subgroup_name already starts with module_key,
+        # use it directly (old prompt convention included module prefix in name).
+        file_key = (
+            subgroup_name
+            if subgroup_name.startswith(module_key + "_")
+            else f"{module_key}_{subgroup_name}"
+        )
         with CodeGraphDB(project_root) as db:
             submodule_hash = _compute_submodule_hash(subgroup_files, db)
     else:

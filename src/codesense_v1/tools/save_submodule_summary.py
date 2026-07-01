@@ -79,7 +79,11 @@ async def save_submodule_summary_tool(
         from codesense_v1 import cache as _cache
         module_key = _cache.safe_key(module_name)
         if subgroup_name is not None:
-            file_key = f"{module_key}_{subgroup_name}"
+            file_key = (
+                subgroup_name
+                if subgroup_name.startswith(module_key + "_")
+                else f"{module_key}_{subgroup_name}"
+            )
             label = f"子模块 '{subgroup_name}'"
         else:
             basename = file_path.rstrip("/").split("/")[-1]
