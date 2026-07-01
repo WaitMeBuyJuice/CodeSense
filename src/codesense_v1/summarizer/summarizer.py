@@ -519,11 +519,32 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         )
 
         warnings: list[str] = []
+
+        # Collect all submitted module names before parsing (for drop detection)
+        submitted_names: list[str] = []
+        for _line in response.splitlines():
+            _line = _line.strip()
+            if _line and "|" in _line:
+                _parts = [p.strip() for p in _line.split("|")]
+                if len(_parts) >= 3 and _parts[0]:
+                    submitted_names.append(_parts[0])
+
         modules_json = _parse_modules_text(response, valid_dirs, warnings=warnings)
         if not modules_json:
             raise InvalidArgumentError(
                 "解析失败：无法从响应中提取有效模块。"
                 "请确保每行格式为「模块名|职责|目录」，不含多余内容。"
+            )
+
+        # Check for modules that were completely dropped (no valid dirs)
+        saved_names_lower = {str(m.get("name", "")).strip().lower() for m in modules_json}
+        dropped = [n for n in submitted_names if n.strip().lower() not in saved_names_lower]
+        if dropped:
+            dropped_list = "、".join(f"`{n}`" for n in dropped)
+            raise InvalidArgumentError(
+                f"提交失败：以下模块无法匹配任何有效目录，被整体跳过：{dropped_list}。\n"
+                "请检查这些模块的目录路径（需使用 project_map 数据中的完整相对路径，且目录中含代码文件），"
+                "修正后重新提交全部模块。"
             )
 
         expanded = _expand_module_files(modules_json, all_file_paths_l1)
@@ -569,20 +590,23 @@ async def submit_project_map(project_root: Path, response: str) -> str:
     rendered = cache.render_project_map(codesense_dir)
 
     n_modules = len(expanded)
+    module_names_str = "、".join(str(m.get("name", "")) for m in expanded)
     warning_suffix = ""
     if warnings:
-        warning_suffix = "\n\n⚠️ 解析警告：\n" + "\n".join(f"- {w}" for w in warnings)
+        warning_suffix = "\n\n⚠️ 解析警告（目录已自动修正，请确认）：\n" + "\n".join(f"- {w}" for w in warnings)
+
+    summary_line = f"模块划分已保存（{n_modules} 个模块：{module_names_str}）。"
 
     if rendered is None:
         return (
-            f"模块划分已保存（{n_modules} 个模块）。"
-            "模块划分已保存，但部分段尚未生成，请重新调用 `project_map` 完成其余段的生成。"
+            summary_line
+            + "部分段尚未生成，请重新调用 `project_map` 完成其余段的生成。"
             + warning_suffix
         )
 
     return (
-        f"模块划分已保存（{n_modules} 个模块）。"
-        "请重新调用 `project_map` 获取完整架构概览。"
+        summary_line
+        + "请重新调用 `project_map` 获取完整架构概览。"
         + warning_suffix
     )
 
@@ -900,14 +924,34 @@ def save_module_summary(
         module_files = set(str(f) for f in (entry.get("files") or []))
         for sg in subgroups:
             sg_files = [f for f in (sg.get("files") or []) if f in module_files]
-            if sg_files:
-                cleaned_subgroups.append({
-                    "name": str(sg.get("name", "")),
-                    "description": str(sg.get("description", "")),
-                    "files": sg_files,
-                })
+            if not sg_files:
+                # All files in this subgroup are unrecognised — report paths to help agent correct
+                bad_files = [str(f) for f in (sg.get("files") or [])]
+                sample = sorted(module_files)[:3]
+                raise InvalidArgumentError(
+                    f"子模块 `{sg.get('name', '')}` 的文件路径均无法匹配模块「{module_name}」的文件列表。"
+                    f"提交的路径：{bad_files}。"
+                    f"正确路径示例（使用 project_map / explore_module 返回的完整相对路径）：{sample}"
+                )
+            cleaned_subgroups.append({
+                "name": str(sg.get("name", "")),
+                "description": str(sg.get("description", "")),
+                "files": sg_files,
+            })
         # Mutate entry so _compute_module_hash sees the same subgroups
         entry["subgroups"] = cleaned_subgroups
+
+    # Validate: when there are ≥2 subgroups, reject any single-file subgroup.
+    # (single-subgroup modules—e.g. errors, registry—are exempt.)
+    if len(cleaned_subgroups) >= 2:
+        bad_sgs = [sg["name"] for sg in cleaned_subgroups if len(sg.get("files") or []) == 1]
+        if bad_sgs:
+            bad_list = "、".join(f"`{n}`" for n in bad_sgs)
+            raise InvalidArgumentError(
+                f"子模块划分无效：{bad_list} 各只含 1 个文件。"
+                "单文件子模块信息密度极低，请将其并入职责相近的同模块子模块后重新提交。"
+                f"（当前模块共 {len(cleaned_subgroups)} 个子模块）"
+            )
 
     with CodeGraphDB(project_root) as db:
         module_hash = _compute_module_hash(entry, db)
