@@ -15,6 +15,7 @@ from codesense_v1.data import (
     module_dependencies,
 )
 from codesense_v1.data.db import CodeGraphDB
+from codesense_v1.data.config import get_ignore_paths
 from codesense_v1.data.hashes import _sha256
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
@@ -89,6 +90,13 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
         elif segment_id == "03_modules":
             roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
             all_file_paths_l1 = [p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)]
+            # Apply ignore_docs.paths filter (same as project_map.py hash_03)
+            _ignore_prefixes_03 = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
+            if _ignore_prefixes_03:
+                all_file_paths_l1 = [
+                    p for p in all_file_paths_l1
+                    if not any(p == ip or p.startswith(ip + "/") for ip in _ignore_prefixes_03)
+                ]
             all_parent_dirs = {
                 fp.rsplit("/", 1)[0] for fp in all_file_paths_l1 if "/" in fp
             }
@@ -99,8 +107,16 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             source_hash = compute_architecture_hash([current_leaf_dirs])
 
         elif segment_id == "04_constraints":
-            edges_internal = [e for e in module_dependencies(db, include_external=False)]
-            source_hash = compute_dependencies_hash(edges_internal)
+            _edges_all = [e for e in module_dependencies(db, include_external=False)]
+            # Apply ignore_docs.paths filter (same as project_map.py hash_04)
+            _ignore_prefixes_04 = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
+            if _ignore_prefixes_04:
+                _edges_all = [
+                    e for e in _edges_all
+                    if not any(e.source.replace("\\", "/") == ip or e.source.replace("\\", "/").startswith(ip + "/") for ip in _ignore_prefixes_04)
+                    and not any(e.target.replace("\\", "/") == ip or e.target.replace("\\", "/").startswith(ip + "/") for ip in _ignore_prefixes_04)
+                ]
+            source_hash = compute_dependencies_hash(_edges_all)
 
         elif segment_id == "05_flows":
             all_db_edges = list(db.iter_edges())
