@@ -30,6 +30,10 @@ _EXPLORE_SUBMODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
             "type": "string",
             "description": "（有 subgroups 时使用）子模块名，如 data_storage。与 file_path 二选一，优先级高于 file_path。",
         },
+        "verify_only": {
+            "type": "boolean",
+            "description": "true 时命中缓存仅返回轻量确认信号（<100 字符），用于保存后的验证步骤；默认 false 返回完整文档",
+        },
     },
     "required": ["module_name"],
     "additionalProperties": False,
@@ -59,6 +63,7 @@ async def explore_submodule(
     module_name: str,
     file_path: str = "",
     subgroup_name: str | None = None,
+    verify_only: bool = False,
 ) -> str:
     module_name = module_name.strip()
     file_path = file_path.strip().replace("\\", "/")
@@ -153,6 +158,9 @@ async def explore_submodule(
             cache_valid = cached_md is not None
 
         if cache_valid:
+            if verify_only:
+                target = subgroup_name or file_path
+                return f"✅ 缓存命中：{module_name} / {target}（{len(cached_md)} 字符）"
             return cached_md  # type: ignore[return-value]
 
         # Cache miss → fetch prompt and embed it inline
@@ -216,6 +224,9 @@ async def explore_submodule(
         cache_valid = cached_md is not None
 
     if cache_valid:
+        if verify_only:
+            target = subgroup_name or file_path
+            return f"✅ 缓存命中：{module_name} / {target}（{len(cached_md)} 字符）"
         return cached_md  # type: ignore[return-value]
 
     # Cache miss → fetch prompt and embed it inline

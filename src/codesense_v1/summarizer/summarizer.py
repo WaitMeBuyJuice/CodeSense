@@ -888,6 +888,9 @@ def save_module_summary(
     # Auto-parse subgroups from summary text if not explicitly provided
     if subgroups is None:
         subgroups, summary = _extract_subgroups_from_summary(summary)
+    else:
+        # subgroups 已显式传入；仍需剥离 summary 中的 JSON 段，避免写入 .md 文件
+        _, summary = _extract_subgroups_from_summary(summary)
 
     # Clean subgroups and update entry before hash computation so the stored
     # hash matches what explore_module will compute (which reads the updated

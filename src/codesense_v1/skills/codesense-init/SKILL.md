@@ -112,7 +112,7 @@ description: >
      - 实现约束清单
    - 同时在摘要末尾输出 `## subgroups（JSON）` 段，定义子模块划分（必须按业务职责归并，不要机械地每文件一组）
    - 调用 `save_module_summary(module_name=<模块名>, summary=<生成的摘要（含 subgroups 段）>)`
-   - 重新调用 `explore_module(module_name=<模块名>)` 确认命中
+   - 重新调用 `explore_module(module_name=<模块名>, verify_only=true)` 确认命中
 
 > **推荐**：每个模块委派给子 Agent 处理（工具返回体中有现成的子 Agent 指令），避免大量文件读取污染主对话上下文。
 
@@ -143,6 +143,7 @@ description: >
 >      - 跨模块依赖（上游/下游模块名）
 >      - 典型调用链（每条用三级标题命名）
 >    - 调用 `save_submodule_summary(module_name="<模块名>", subgroup_name="<子模块名>", summary=<生成的文档>)`
+>    - 调用 `explore_submodule(module_name="<模块名>", subgroup_name="<子模块名>", verify_only=true)` 确认命中
 > 4. 全部完成后回复"已完成"
 
 **优势**：

@@ -21,7 +21,11 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "module_name": {
             "type": "string",
             "description": "project_map 中列出的模块名（精确名称）",
-        }
+        },
+        "verify_only": {
+            "type": "boolean",
+            "description": "true 时命中缓存仅返回轻量确认信号（<100 字符），用于保存后的验证步骤；默认 false 返回完整文档",
+        },
     },
     "required": ["module_name"],
     "additionalProperties": False,
@@ -55,7 +59,7 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
     ),
     input_schema=_EXPLORE_MODULE_INPUT_SCHEMA,
 )
-async def explore_module(module_name: str) -> str:
+async def explore_module(module_name: str, verify_only: bool = False) -> str:
     module_name = module_name.strip()
     if not module_name:
         raise InvalidArgumentError(
@@ -144,6 +148,12 @@ async def explore_module(module_name: str) -> str:
     else:
         module_cache_valid = cached_md is not None
     if module_cache_valid:
+        if verify_only:
+            subgroups = entry.get("subgroups") or []
+            sg_names = " / ".join(str(sg.get("name", "")) for sg in subgroups if isinstance(sg, dict))
+            size = len(cached_md)
+            sg_part = f"，子模块：{sg_names}" if sg_names else ""
+            return f"✅ 缓存命中：{module_name}（{size} 字符{sg_part}）"
         return cached_md  # type: ignore[return-value]
 
     # Cache miss → fetch prompt and embed it inline
