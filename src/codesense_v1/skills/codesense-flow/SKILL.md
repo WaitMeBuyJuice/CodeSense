@@ -25,7 +25,6 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
 > 缓存未就绪时，工具返回体内嵌了初始化引导，按步骤完成后重新调用。
-> 同一会话多次调用project_map工具时，`_nonce` 传不同递增值（"1"、"2"……）以避免客户端重复调用拦截。
 > **注意**：初始化时可能需要两次调用 `project_map`：第一次完成 01_identity 和 03_modules，第二次完成边界规则 / 流程 / 概念索引段。
 
 ---
@@ -94,7 +93,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 | 查某函数被谁调用 | `codegraph_callers` |
 | 理解某段逻辑 / 探索某区域 | `codegraph_explore` |
 | 已知文件路径 | 	`codegraph_node` / `read_file` |
-| 已知符号名 |  `codegp` |
+| 已知符号名 | `codegraph_node` |
 
 ---
 
@@ -110,17 +109,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 ## save_* 工具使用时机
 
-缓存未就绪（cache miss）时，工具返回体内嵌推理 prompt。流程：
-
-1. 工具返回 cache miss + 内嵌 prompt
-2. Agent 按 prompt 推理，生成文档内容
-3. 调对应 save 工具写回缓存：
-   - `save_module_summary` — 保存模块总览（可选传 subgroups 定义子模块划分）
-   - `save_submodule_summary` — 保存子模块文档
-   - `save_project_map_segment` — 保存 project_map 各段（01/03/04/05/06）
-4. 重新调原工具，此时命中缓存正常返回
-
-> `submit_project_map` 仅在 03_modules 段完成后调用，用于驱动 modules_index 更新。
+> cache miss 标准处理流程见 SERVER_INSTRUCTIONS `## 缓存未就绪时` 节。
 
 ---
 
