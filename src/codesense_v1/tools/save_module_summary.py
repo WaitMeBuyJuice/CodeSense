@@ -23,7 +23,7 @@ _SCHEMA: Final[dict[str, object]] = {
         "subgroups": {
             "type": "array",
             "description": (
-                "子模块划分（可选）。每项含 name（子模块名，格式 <module>_<标识>）、"
+                "子模块划分（可选）。每项含 name（子模块名，格式 <标识>，不含模块名前缀，如 storage、api）、"
                 "description（职责说明）、files（文件路径列表）三个字段。"
                 "仅当本次自行划分了子模块时传入；已有划分无需重复传入。"
             ),

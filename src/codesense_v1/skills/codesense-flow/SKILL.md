@@ -54,7 +54,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 调用 `explore_submodule(module_name=<模块英文key>, subgroup_name=<子模块名>)`。
 
-- `subgroup_name` 从 `explore_module` 返回的「子模块列表」中取（如 `data_storage`、`cache_storage`）
+- `subgroup_name` 从 `explore_module` 返回的「子模块列表」中取（如 `storage`、`api`）
 - 若模块尚未定义 subgroups，可用 `file_path=<完整相对路径>` 替代
 
 返回内容：
@@ -119,7 +119,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 1. `project_map` → 确认缓存模块位置与跨模块依赖
 2. `explore_module("cache")` → 看架构简析、子模块列表和实现约束
-3. `explore_submodule("cache", subgroup_name="cache_storage")` → 看对外能力和典型调用链
+3. `explore_submodule("cache", subgroup_name="storage")` → 看对外能力和典型调用链
 4. `codegraph_node(file="cache.py")` → 读源码定位修改点
 5. 修改
 
