@@ -43,7 +43,7 @@ _PROJECT_MAP_INPUT_SCHEMA: Final[dict[str, object]] = {
     "properties": {
         "_nonce": {
             "type": "string",
-            "description": "",
+            "description": "必须传入，且同一会话内每次调用须使用不同的递增字符串（如 \"1\"、\"2\"、\"3\"……）。缺失或重复会被客户端拦截，导致工具无法执行。",
         }
     },
     "additionalProperties": False,
@@ -82,7 +82,8 @@ def _seg_valid(codesense_dir: Path, seg_id: str, current_hash: str, auto_expire:
         "示例：\n"
         "- 用户问「这个项目的整体架构是什么？」→ 调用 project_map\n"
         "- 用户问「登录功能在哪个模块？」→ 调用 project_map\n"
-        "- 用户问「修改缓存逻辑会影响哪些地方？」→ 先 project_map 看依赖"
+        "- 用户问「修改缓存逻辑会影响哪些地方？」→ 先 project_map 看依赖\n\n"
+        "**调用要求**：每次调用必须传 _nonce 参数，且同一会话内不得重复（如依次传 \"1\"、\"2\"、\"3\"）。"
     ),
     input_schema=_PROJECT_MAP_INPUT_SCHEMA,
 )
