@@ -308,7 +308,6 @@ def _clear_modules_dir(codesense_dir: Path) -> None:
 
 _SEGMENT_IDS: tuple[str, ...] = (
     "01_identity",
-    "02_structure",
     "03_modules",
     "04_constraints",
     "05_flows",

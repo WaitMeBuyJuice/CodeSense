@@ -8,13 +8,10 @@ from typing import Final
 
 from codesense_v1 import cache
 from codesense_v1.data import (
-    classify_top_dirs,
     collect_identity_sources,
     compute_architecture_hash,
     compute_dependencies_hash,
-    compute_tree_max_depth,
     compute_identity_hash,
-    compute_structure_hash,
     extract_tech_stack_hint,
     find_cycles,
     list_modules,
@@ -22,7 +19,7 @@ from codesense_v1.data import (
     topological_layers,
 )
 from codesense_v1.data.db import CodeGraphDB
-from codesense_v1.data.files import directory_tree
+from codesense_v1.data.files import _load_ignore_spec
 from codesense_v1.data.hashes import _sha256
 from codesense_v1.registry import tool
 from codesense_v1.summarizer import (
@@ -35,7 +32,6 @@ from codesense_v1.summarizer import (
     get_project_map_prompt,
     is_auto_expire_enabled,
     render_dependencies_segment,
-    render_structure_segment,
 )
 from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
@@ -115,20 +111,22 @@ async def project_map(_nonce: str | None = None) -> str:
         edges_all = module_dependencies(db, include_external=True)
         edges_internal = [e for e in edges_all if not e.is_external]
         all_file_paths = [f.path.replace("\\", "/") for f in db.iter_files()]
-        tree_root = directory_tree(db)
         identity_sources = collect_identity_sources(project_root, db)
         all_db_edges = list(db.iter_edges())
         symbol_map = _build_symbol_module_map(saved_modules, db)
 
-    top_dirs = classify_top_dirs(all_file_paths)
     cycles = find_cycles(edges_internal, modules_data)
 
     # ---- Compute hashes -----------------------------------------------------
     hash_01 = compute_identity_hash(identity_sources)
-    hash_02 = compute_structure_hash(top_dirs)
 
     roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
     all_file_paths_l1 = [p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)]
+
+    # 应用 ignore_docs.paths 过滤，与 submit_project_map 保持一致（确保 hash_03 两侧相等）
+    _pm_ignore_spec = _load_ignore_spec(project_root)
+    if _pm_ignore_spec is not None:
+        all_file_paths_l1 = [p for p in all_file_paths_l1 if not _pm_ignore_spec.match_file(p)]
 
     all_parent_dirs = {
         fp.replace("\\", "/").rsplit("/", 1)[0]
@@ -162,11 +160,6 @@ async def project_map(_nonce: str | None = None) -> str:
     hash_06 = _sha256(json.dumps(concepts_data + modules_desc))
 
     # ---- Generate pure-program segments immediately -------------------------
-    if not _seg_valid(codesense_dir, "02_structure", hash_02, auto_expire):
-        adaptive_depth = compute_tree_max_depth(all_file_paths)
-        content_02 = render_structure_segment(project_root, top_dirs, tree_root, max_depth=adaptive_depth)
-        cache.write_segment(codesense_dir, "02_structure", content_02, hash_02)
-
     if not _seg_valid(codesense_dir, "07_dependencies", hash_07, auto_expire):
         content_07 = render_dependencies_segment(saved_modules, edges_internal, cycles)
         cache.write_segment(codesense_dir, "07_dependencies", content_07, hash_07)
@@ -232,9 +225,21 @@ async def project_map(_nonce: str | None = None) -> str:
         )
 
     steps_str = "\n\n---\n\n".join(steps)
+
+    # 分类：从未生成 vs 缓存失效（文件存在但 hash 过期）
+    new_segs = [seg_id for seg_id, _, _ in missing if cache.read_segment(codesense_dir, seg_id) is None]
+    expired_segs = [seg_id for seg_id, _, _ in missing if cache.read_segment(codesense_dir, seg_id) is not None]
+    summary_parts = []
+    if new_segs:
+        summary_parts.append("**待生成**：" + "、".join(f"`{s}`" for s in new_segs))
+    if expired_segs:
+        summary_parts.append("**缓存失效**：" + "、".join(f"`{s}`" for s in expired_segs))
+    summary_str = "\n".join(summary_parts) + "\n\n" if summary_parts else ""
+
     return (
         "# 项目概览尚未完整，需生成以下段落\n\n"
-        "## 生成顺序说明\n\n"
+        + summary_str
+        + "## 生成顺序说明\n\n"
         "- **必须先完成 `03_modules`**（其他段依赖模块划分结果）\n"
         "- `01_identity` 与 `03_modules` 可并行生成\n"
         "- `04_constraints`、`05_flows`、`06_concepts` 需在 `03_modules` 完成后执行\n\n"

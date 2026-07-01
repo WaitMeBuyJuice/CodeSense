@@ -26,7 +26,7 @@ from codesense_v1.data.docstrings import (
     extract_symbol_docstrings,
     is_enabled as _docstrings_enabled,
 )
-from codesense_v1.data.files import DirectoryNode
+from codesense_v1.data.files import DirectoryNode, _load_ignore_spec
 from codesense_v1.data.modules import list_modules, module_dependencies
 from codesense_v1.data.project_info import IdentitySource
 from codesense_v1.data.ref_docs import ref_docs_prompt_section
@@ -44,6 +44,18 @@ _EXTERNAL_PREFIX = "external::"
 _DESC_MAX_LEN = 60
 _NAME_MIN_LEN = 2
 _NAME_MAX_LEN = 32
+
+# 代码源文件扩展名：只有这些文件才参与模块划分（排除 XML/YAML 等资源文件）
+_CODE_EXTENSIONS: frozenset[str] = frozenset({
+    ".java", ".kt", ".scala",
+    ".py", ".pyi",
+    ".go",
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".rs",
+    ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",
+    ".cs",
+    ".rb", ".swift", ".php", ".lua", ".r",
+})
 _FUZZY_CUTOFF = 0.85
 _FALLBACK_MODULE_NAME = "其他"
 _FALLBACK_MODULE_DESC = "未归类目录"
@@ -267,6 +279,9 @@ def _normalize_dir(
         return d, False
     if d in valid_dirs:
         return d, False
+    # 前缀匹配：如果 valid_dirs 里有以 d 为前缀的子目录，则 d 是有效的父目录
+    if any(v.startswith(d + "/") for v in valid_dirs):
+        return d, False
     matches = difflib.get_close_matches(d, valid_dirs, n=1, cutoff=_FUZZY_CUTOFF)
     return (matches[0], True) if matches else (None, False)
 
@@ -332,6 +347,22 @@ async def get_project_map_prompt(project_root: Path) -> str:
         }
 
     roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
+
+    # 应用 ignore_docs.paths 过滤：从 dir_syms/dir_deps/file_paths 中排除被忽略的目录
+    _ignore_spec = _load_ignore_spec(project_root)
+    if _ignore_spec is not None:
+        all_file_rows = [f for f in all_file_rows if not _ignore_spec.match_file(f.path.replace("\\", "/"))]
+        all_file_paths = [f.path.replace("\\", "/") for f in all_file_rows]
+        file_languages = {f.path.replace("\\", "/"): f.language for f in all_file_rows}
+        _is_ignored = lambda d: _ignore_spec.match_file(d) or _ignore_spec.match_file(d + "/")
+        dir_syms = {d: s for d, s in dir_syms.items() if not _is_ignored(d)}
+        dir_deps = {
+            src: {kind: [t for t in tgts if not _is_ignored(t)] for kind, tgts in buckets.items()}
+            for src, buckets in dir_deps.items()
+            if not _is_ignored(src)
+        }
+        roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
+
     dir_syms = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
     dir_deps = _filter_dir_deps(dir_deps, roots)
 
@@ -469,13 +500,22 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         all_file_paths_l1 = [
             p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)
         ]
+        # 应用 ignore_docs.paths 过滤，确保被忽略目录的文件不进入 valid_dirs
+        _sub_ignore_spec = _load_ignore_spec(project_root)
+        if _sub_ignore_spec is not None:
+            all_file_paths_l1 = [p for p in all_file_paths_l1 if not _sub_ignore_spec.match_file(p)]
         dir_deps_l1 = _filter_dir_deps(dir_deps, roots)
         dir_syms_l1 = {d: s for d, s in dir_syms.items() if _is_under_roots(d, roots)}
+        # 只用代码源文件（排除 XML/YAML 等资源文件）计算叶子目录，避免纯资源目录进入 valid_dirs
+        code_file_paths_l1 = [
+            p for p in all_file_paths_l1
+            if any(p.endswith(ext) for ext in _CODE_EXTENSIONS)
+        ]
         valid_dirs: set[str] = (
             set(dir_deps_l1.keys())
             | set(dir_syms_l1.keys())
-            | _leaf_dirs_from_files(all_file_paths_l1)
-            | _top_level_files_from_paths(all_file_paths_l1)
+            | _leaf_dirs_from_files(code_file_paths_l1)
+            | _top_level_files_from_paths(code_file_paths_l1)
         )
 
         warnings: list[str] = []
@@ -488,6 +528,14 @@ async def submit_project_map(project_root: Path, response: str) -> str:
 
         expanded = _expand_module_files(modules_json, all_file_paths_l1)
 
+        # 过滤掉无代码源文件的模块（如纯 XML 资源目录），防止框架 boilerplate 进入模块列表
+        expanded = [
+            m for m in expanded
+            if any(
+                any(str(f).replace("\\", "/").endswith(ext) for ext in _CODE_EXTENSIONS)
+                for f in (m.get("files") or [])
+            )
+        ]
         # Migrate renamed modules before pruning stale entries
         _migrate_renamed_module_caches(codesense_dir, expanded, db)
 
@@ -1151,6 +1199,16 @@ def _render_basic_architecture_segment(
     layers: list[list[str]],
 ) -> str:
     """Render 03_architecture segment from module list + topo layers (no LLM)."""
+    _MAX_DISPLAY_PATHS = 3
+
+    def _truncate_paths(paths: list[str]) -> str:
+        """超过 _MAX_DISPLAY_PATHS 条时显示前 N 条 + 「等 M 项」后缀。"""
+        paths = [str(p) for p in paths]
+        if len(paths) > _MAX_DISPLAY_PATHS:
+            shown = "、".join(paths[:_MAX_DISPLAY_PATHS])
+            return f"{shown} 等 {len(paths)} 项"
+        return "、".join(paths)
+
     from codesense_v1.data.structure import auxiliary_category
 
     # Build dir/file → module name lookup for layer label resolution
@@ -1181,33 +1239,20 @@ def _render_basic_architecture_segment(
     lines: list[str] = []
 
     # Module list table
-    # Collect all dirs across modules to detect "parent dirs" (dirs that are
-    # prefixes of other modules' dirs → should display files instead).
-    all_module_dirs: set[str] = {
-        str(d)
-        for m in modules if isinstance(m, dict)
-        for d in (m.get("directories") or [])
-    }
-
     def _best_path(m: dict) -> str:
         dirs = m.get("directories") or []
         files = m.get("files") or []
-        if not dirs:
-            # File-level module: show all files (skip __init__.py)
-            meaningful = [f for f in files if not str(f).endswith("__init__.py")]
-            return "、".join(str(f) for f in (meaningful or files))
-        # Check if any of this module's dirs is a parent of another module's dir
-        is_parent = any(
-            other != str(d) and other.startswith(str(d) + "/")
-            for d in dirs
-            for other in all_module_dirs
-        )
-        if is_parent:
-            meaningful = [f for f in files if not str(f).endswith("__init__.py")]
-            if meaningful:
-                return "、".join(str(f) for f in meaningful)
-        return "、".join(str(d) for d in dirs)
-
+        if dirs:
+            # 有目录的模块：Agent 只写了一个顶层目录，直接显示；
+            # 若旧格式写了多个子目录，用 LCA 收敛到父目录
+            dirs_norm = [str(d).replace("\\", "/") for d in dirs]
+            if len(dirs_norm) == 1:
+                return dirs_norm[0]
+            lca = _lca_path(dirs_norm)
+            return lca if lca else dirs_norm[0]
+        # 单文件模块：显示文件路径
+        meaningful = [f for f in files if not str(f).endswith("__init__.py")]
+        return _truncate_paths(meaningful or files)
     lines.append("## 模块列表\n")
     lines.append("| 模块 | 职责 | 主要目录 |")
     lines.append("|------|------|----------|")
@@ -1349,8 +1394,11 @@ def _build_project_map_prompt(
         "## 上下文\n"
         f"- 以下目录均位于产品源代码根（{roots_str}）下，是项目的核心实现，"
         "已排除测试与脚手架。\n"
-        f"- 项目共 {n_dirs} 个目录，**默认假设：每个目录代表一个独立模块**，"
-        f"预期产出约 {n_dirs} 个模块。\n"
+        f"- 项目共 {n_dirs} 个目录，请根据业务功能边界划分为若干模块（通常远少于目录数）。\n"
+        "- **模块粒度规则**：模块应对应一个独立的业务功能域（如 auth、counter、knowpost），"
+        "而非技术分层。若某目录下的子目录名主要为技术层次词（api、controller、service、mapper、"
+        "repository、model、dto、config、impl、util、event、listener 等），则以该父目录为模块，"
+        "子目录不单独划分。只有子目录本身具有独立业务意义且跨多个功能使用时，才可单独成模块。\n"
         "- 仅当两个目录承担**完全相同**的职责且强耦合时，才可合并为同一模块；"
         "语义不同的目录（如 errors、llm、cache）必须独立成模块。\n"
         "- 目录条目中 `(←N →M)` 表示：该目录被 N 个其他目录依赖（fan-in），"
@@ -1365,16 +1413,18 @@ def _build_project_map_prompt(
         + (f"## 参考文档\n\n{ref_docs_section}\n" if ref_docs_section else "")
         + "## 输出格式\n\n"
         "每行一个模块，用竖线（|）分隔三列：\n"
-        "  模块名|一句话职责|所属目录或文件路径（多个用英文逗号分隔）\n\n"
+        "  模块名|一句话职责|模块顶层目录路径\n\n"
         "示例行：\n"
         "  缓存层|管理 .codesense 缓存文件的读写与失效|src/codesense_v1/cache\n"
-        "  数据层|封装 CodeGraph DB 查询与模块依赖聚合|src/data,src/models\n"
+        "  数据层|封装 CodeGraph DB 查询与模块依赖聚合|src/data\n"
         "  错误定义|统一异常层次|src/codesense_v1/errors.py\n\n"
         "规则：\n"
         "- 每个模块占一行\n"
         "- 不要输出标题行、编号、Markdown 格式或任何其他内容\n"
-        "- 路径为相对项目根的路径；单文件模块可直接写文件路径（如 `src/pkg/errors.py`）\n"
+        "- 第三列只写**一个**顶层目录路径（不要展开子目录），路径为相对项目根的路径；单文件模块直接写文件路径（如 `src/pkg/errors.py`）\n"
         "- 同一目录/文件不归属多个模块\n"
+        "- 不要把框架启动入口（如 Spring Boot 的 `@SpringBootApplication` 所在目录，通常只有 1 个 main 文件）单独划分为模块，可归入最近的父级或省略\n"
+        "- 不要把纯配置/资源目录（目录内无业务代码源文件的目录）划分为模块\n"
         "- 必须覆盖所有目录\n"
         "- **禁止把所有目录归到单一模块**（这是错误划分；至少 2 个模块）\n"
         "- 模块名必须使用英文（如 data / cache / registry / summarizer / tools / server / errors），"
@@ -1611,23 +1661,72 @@ def _build_module_prompt(
 # ---------- project_map segment API -----------------------------------------
 
 
+def _lca_path(paths: list[str]) -> str | None:
+    """计算一组路径的最近公共祖先（按 '/' 分割）。
+
+    例：['auth/api', 'auth/service', 'auth/model'] → 'auth'
+    单路径返回本身；空列表返回 None；无公共前缀返回 None。
+    """
+    if not paths:
+        return None
+    if len(paths) == 1:
+        return paths[0]
+    parts = [p.split("/") for p in paths]
+    common: list[str] = []
+    for level in zip(*parts):
+        if len(set(level)) == 1:
+            common.append(level[0])
+        else:
+            break
+    return "/".join(common) if common else None
+
+
 def render_structure_segment(
     project_root: Path,
     top_dirs: list[TopLevelDir],
     tree_root: DirectoryNode,
     max_depth: int = 3,
+    modules: list[dict] | None = None,
 ) -> str:
     """Render 02_structure.md — pure program, no Agent needed.
 
-    Produces a depth-3 directory tree with auxiliary dir annotations.
+    若提供 *modules*，遇到模块目录时附 `# 描述` 注释并停止向下展开（codemap 风格）。
     """
     project_name = project_root.resolve().name or project_root.resolve().parts[-1]
     lines: list[str] = [f"## 顶层目录结构\n", f"```", f"{project_name}/"]
 
-    # Set of auxiliary top-level dir names for skip-expansion
     aux_names = {d.name for d in top_dirs if d.is_auxiliary}
 
-    def _render_node(node: DirectoryNode, depth: int, prefix: str) -> None:
+    # 有模块注释时，提高兜底深度，确保目录树能展开到模块所在层（最终由 module_annotations 截断）
+    effective_max_depth = max(max_depth, 8) if modules else max_depth
+
+    # 构建模块目录 → 描述映射
+    # 对每个模块的 directories 计算 LCA，用最近公共祖先代表该模块在树中的截断位置
+    module_annotations: dict[str, str] = {}
+    if modules:
+        module_lca_dirs: dict[str, str] = {}
+        for m in modules:
+            if not isinstance(m, dict):
+                continue
+            dirs = [str(d).replace("\\", "/") for d in (m.get("directories") or [])]
+            desc = str(m.get("description", "")).strip()
+            lca = _lca_path(dirs)
+            if lca:
+                module_lca_dirs[lca] = desc
+
+        # 跨模块判断：排除是其他模块 LCA 的父目录的情况（避免遮蔽子模块展开）
+        all_lca = set(module_lca_dirs.keys())
+        for d_norm, desc in module_lca_dirs.items():
+            is_parent_of_other = any(
+                other != d_norm and other.startswith(d_norm + "/")
+                for other in all_lca
+            )
+            if not is_parent_of_other:
+                module_annotations[d_norm] = desc
+
+    def _render_node(
+        node: DirectoryNode, depth: int, prefix: str, current_path: str
+    ) -> None:
         children = sorted(node.subdirs.values(), key=lambda n: n.name)
         all_items: list[tuple[str, bool, DirectoryNode | None]] = []
         for c in children:
@@ -1641,16 +1740,24 @@ def render_structure_segment(
             ext_prefix = "    " if is_last else "│   "
 
             if is_dir:
+                new_path = f"{current_path}/{name}" if current_path else name
+
+                # 命中模块目录：附描述注释，不再向下展开
+                if new_path in module_annotations:
+                    desc = module_annotations[new_path]
+                    annotation = f"   # {desc}" if desc else ""
+                    lines.append(f"{prefix}{connector}{name}/{annotation}")
+                    continue
+
                 td = next((d for d in top_dirs if d.name == name), None)
                 annotation = f"  [{td.category}]" if td and td.category else ""
                 lines.append(f"{prefix}{connector}{name}/{annotation}")
-                # Don't expand auxiliary dirs (already summarised below)
-                if depth < max_depth and child and name not in aux_names:
-                    _render_node(child, depth + 1, prefix + ext_prefix)
+                if depth < effective_max_depth and child and name not in aux_names:
+                    _render_node(child, depth + 1, prefix + ext_prefix, new_path)
             else:
                 lines.append(f"{prefix}{connector}{name}")
 
-    _render_node(tree_root, depth=1, prefix="")
+    _render_node(tree_root, depth=1, prefix="", current_path="")
     lines.append("```")
 
     return "\n".join(lines)

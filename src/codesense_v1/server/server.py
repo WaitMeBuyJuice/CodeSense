@@ -107,8 +107,73 @@ async def run_stdio() -> None:
 def main() -> None:
     """同步入口：asyncio.run(run_stdio())。供 `codesense` 命令调用。"""
     _init_codesense_config()
+    _auto_sync_ignore_test_dirs()
     _init_skills()
     asyncio.run(run_stdio())
+
+
+def _auto_sync_ignore_test_dirs() -> None:
+    """每次启动时扫描项目内 test/tests/__tests__/spec 等目录，追加到 ignore_docs.paths（去重，不覆盖用户已有配置）。"""
+    import json
+
+    project_root_str = os.environ.get("CODESENSE_PROJECT_ROOT", "")
+    if not project_root_str:
+        return
+    project_root = Path(project_root_str)
+    config_path = project_root / ".codesense" / ".codesense_config"
+    if not config_path.exists():
+        return
+
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(config, dict):
+        return
+
+    _TEST_DIR_NAMES = {"test", "tests", "testing", "__tests__", "spec", "specs"}
+
+    found: list[str] = []
+
+    def _scan(path: Path, depth: int, rel_parts: list[str]) -> None:
+        if depth > 5:
+            return
+        try:
+            for entry in sorted(path.iterdir()):
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                rel = "/".join(rel_parts + [entry.name])
+                if entry.name in _TEST_DIR_NAMES:
+                    found.append(rel)
+                else:
+                    _scan(entry, depth + 1, rel_parts + [entry.name])
+        except PermissionError:
+            pass
+
+    _scan(project_root, 1, [])
+
+    if not found:
+        return
+
+    ignore_docs = config.setdefault("ignore_docs", {})
+    if not isinstance(ignore_docs, dict):
+        ignore_docs = {}
+        config["ignore_docs"] = ignore_docs
+
+    existing: list[str] = ignore_docs.get("paths", [])
+    if not isinstance(existing, list):
+        existing = []
+
+    existing_set = set(existing)
+    new_paths = [p for p in found if p not in existing_set]
+    if not new_paths:
+        return
+
+    ignore_docs["paths"] = sorted(existing_set | set(new_paths))
+    config_path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _init_codesense_config() -> None:

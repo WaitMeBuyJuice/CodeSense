@@ -98,7 +98,7 @@ def compute_tree_max_depth(
     Algorithm:
     1. Find leaf dirs (dirs that directly contain files, with no child dirs).
     2. Filter out auxiliary top-level dirs (tests/, docs/, scripts/ etc.).
-    3. Return min(leaf_dir_depth) clamped to *floor*.
+    3. Return 75th percentile of leaf_dir_depth clamped to *floor*.
 
     Examples:
         Python (src/codesense_v1/cache/):  leaf depth 3 → max_depth = max(3, 3) = 3
@@ -143,5 +143,8 @@ def compute_tree_max_depth(
         return floor
 
     # Depth = number of path segments (e.g. "src/pkg/cache" → 3)
-    min_source_depth = min(len(d.split("/")) for d in source_leaf_dirs)
-    return max(floor, min_source_depth)
+    sorted_depths = sorted(len(d.split("/")) for d in source_leaf_dirs)
+    # 取 75 分位深度，让浅层叶子目录（如 resources/mapper）不再拉低整体展开深度
+    percentile_idx = max(0, int(len(sorted_depths) * 0.75) - 1)
+    target_depth = sorted_depths[min(percentile_idx, len(sorted_depths) - 1)]
+    return max(floor, target_depth)
