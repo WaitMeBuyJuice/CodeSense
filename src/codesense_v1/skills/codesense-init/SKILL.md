@@ -48,6 +48,8 @@ description: >
 
 ## Phase 1：生成 project_map（项目概览）
 
+> **进度确认**：若不确定当前初始化到哪个阶段，可先调用 `init_status()` 查看三阶段完成情况，再决定从哪里开始。
+
 ### 1.1 首次调用 project_map
 
 调用 `project_map(_nonce="1")`。

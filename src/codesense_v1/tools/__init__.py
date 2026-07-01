@@ -3,6 +3,7 @@
 from . import (
     explore_module,  # noqa: F401
     explore_submodule,  # noqa: F401
+    init_status,  # noqa: F401
     project_map,  # noqa: F401
     save_module_summary,  # noqa: F401
     save_project_map_segment,  # noqa: F401
