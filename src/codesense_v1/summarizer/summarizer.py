@@ -19,7 +19,7 @@ from codesense_v1.data.architecture import (
     find_cycles,
     topological_layers,
 )
-from codesense_v1.data.config import get_cache_auto_expire, get_include_dirs
+from codesense_v1.data.config import get_cache_auto_expire, get_ignore_paths, get_include_dirs
 from codesense_v1.data.db import CodeGraphDB
 from codesense_v1.data.docstrings import (
     extract_file_docstring,
@@ -581,6 +581,13 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         cache.write_segment(codesense_dir, "03_modules", seg03_content, seg03_hash)
 
     # Always regenerate 07_dependencies with module name mappings now available.
+    # Filter out edges where source or target is under an ignored path.
+    _sub_ignore_prefixes = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
+    if _sub_ignore_prefixes:
+        def _sub_edge_ignored(path: str) -> bool:
+            fp = path.replace("\\", "/")
+            return any(fp == ip or fp.startswith(ip + "/") for ip in _sub_ignore_prefixes)
+        edges = [e for e in edges if not _sub_edge_ignored(e.source) and not _sub_edge_ignored(e.target)]
     cycles_for_07 = find_cycles(edges, modules_data)
     seg07_content = render_dependencies_segment(expanded, edges, cycles_for_07)
     seg07_hash = compute_dependencies_hash(edges)

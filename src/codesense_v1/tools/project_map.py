@@ -19,6 +19,7 @@ from codesense_v1.data import (
     topological_layers,
 )
 from codesense_v1.data.db import CodeGraphDB
+from codesense_v1.data.config import get_ignore_paths
 from codesense_v1.data.files import _load_ignore_spec
 from codesense_v1.data.hashes import _sha256
 from codesense_v1.registry import tool
@@ -116,6 +117,14 @@ async def project_map(_nonce: str | None = None) -> str:
         symbol_map = _build_symbol_module_map(saved_modules, db)
 
     cycles = find_cycles(edges_internal, modules_data)
+
+    # Filter edges: exclude any edge where source or target is under an ignored path
+    _ignore_prefixes = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
+    if _ignore_prefixes:
+        def _edge_ignored(path: str) -> bool:
+            fp = path.replace("\\", "/")
+            return any(fp == ip or fp.startswith(ip + "/") for ip in _ignore_prefixes)
+        edges_internal = [e for e in edges_internal if not _edge_ignored(e.source) and not _edge_ignored(e.target)]
 
     # ---- Compute hashes -----------------------------------------------------
     hash_01 = compute_identity_hash(identity_sources)
