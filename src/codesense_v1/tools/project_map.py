@@ -43,7 +43,7 @@ _PROJECT_MAP_INPUT_SCHEMA: Final[dict[str, object]] = {
     "properties": {
         "_nonce": {
             "type": "string",
-            "description": "必须传入，且同一会话内每次调用须使用不同的递增字符串（如 \"1\"、\"2\"、\"3\"……）。缺失或重复会被客户端拦截，导致工具无法执行。",
+            "description": "必须传入，且同一会话内每次调用须使用不同的递增字符串（如 \"1\"、\"2\"、\"3\"……）。某些 MCP 客户端可能会拦截重复值。",
         }
     },
     "additionalProperties": False,
