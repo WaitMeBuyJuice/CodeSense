@@ -120,6 +120,8 @@ description: >
 
 **小模块例外**：若某模块的文件 ≤ 3 条，由主 Agent 直接处理（按工具返回的「方式 2：主 Agent 直接执行」），不派发子 Agent。子 Agent 启动开销大于上下文污染成本。
 
+> 例：`errors`（仅 1 个 errors.py）、`registry`（仅 1 个 registry.py）、`skills`（2-3 个文件）均属小模块，直接处理即可。
+
 ---
 
 ## Phase 3：生成子模块文档
@@ -134,6 +136,8 @@ description: >
 为每个模块创建 1 个子 Agent，传入以下任务清单：
 
 > 你是负责生成模块 `<模块名>` 全部子模块文档的子 Agent。该模块包含子模块：`<sub1>`、`<sub2>`……
+>
+> **注意**：`explore_submodule`、`save_submodule_summary` 工具已在 CodeSense MCP 服务器注册，可直接调用，无需先激活。
 >
 > 依次处理每个子模块：
 > 1. 调用 `explore_submodule(module_name="<模块名>", subgroup_name="<子模块名>")`
@@ -154,6 +158,8 @@ description: >
 - 同模块内子模块上下文连贯，文档风格统一
 
 **小模块例外**：若某模块的子模块数 ≤ 2，由主 Agent 直接处理，不派发子 Agent。
+
+> 例：`errors`（1 个子模块）、`config`（2 个子模块）属于小模块，直接处理；`auth`（4 个子模块）、`data`（5 个子模块）则应派发子 Agent。
 
 ---
 
