@@ -78,7 +78,7 @@ def _seg_valid(codesense_dir: Path, seg_id: str, current_hash: str, auto_expire:
         "- 查看模块内部接口、文件结构（使用 explore_module）\n"
         "- 查看具体类、函数或调用链（使用 CodeGraph 工具）\n"
         "- 查看源码文本（使用 grep/read_file）\n\n"
-        "若缓存未就绪，工具会返回初始化步骤，引导完成后重新调用。\n\n"
+        "若缓存未就绪，工具会返回初始化步骤，引导完成后重新调用；project_map 验证方式为直接重调（无需传 `verify_only` 参数）。\n\n"
         "示例：\n"
         "- 用户问「这个项目的整体架构是什么？」→ 调用 project_map\n"
         "- 用户问「登录功能在哪个模块？」→ 调用 project_map\n"

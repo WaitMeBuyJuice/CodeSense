@@ -55,6 +55,7 @@ _EXPLORE_SUBMODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "- module_name 必须是 project_map 返回的模块名之一\n"
         "- subgroup_name（优先）：从 explore_module 返回的「子模块列表」中取（如 data_storage）\n"
         "- file_path（备用）：若模块尚未定义 subgroups，可用文件相对路径\n\n"
+        "传 `verify_only=true` 可获得轻量验证信号（缓存命中时 <100 字符），用于 cache miss 后的保存→验证流程。\n"
         "若缓存未就绪，工具会返回生成步骤，引导完成后重新调用。"
     ),
     input_schema=_EXPLORE_SUBMODULE_INPUT_SCHEMA,

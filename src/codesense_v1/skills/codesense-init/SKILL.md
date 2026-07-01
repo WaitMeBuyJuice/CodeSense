@@ -68,7 +68,7 @@ description: >
 **生成 03_modules**（模块划分，其他段依赖此段，优先完成）：
 1. 按返回的提示词生成模块划分，格式：每行 `模块名|一句话职责|目录路径`（多目录用英文逗号分隔）
 2. **模块名必须使用英文**（如 `data`、`cache`、`summarizer`），不得使用中文
-3. 调用 `submit_project_map(response=<模块划分文本>)`
+3. 调用 `submit_project_map(response=<模块划分文本>)`（`03_modules` 段由此自动保存）
 
 > `02_structure` 和 `07_dependencies` 由程序自动生成，无需 Agent 处理。
 
@@ -112,7 +112,7 @@ description: >
      - 子模块列表（子模块名 | 职责 | 包含文件）
      - 上下游关系
      - 实现约束清单
-   - 同时在摘要末尾输出 `## subgroups（JSON）` 段，定义子模块划分（必须按业务职责归并，不要机械地每文件一组；**当子模块数 ≥ 2 时，每个子模块必须包含 ≥ 2 个文件**，单文件必须并入职责相近的组，否则 `save_module_summary` 会返回错误；**files 字段必须使用完整相对路径**，与 explore_module 返回的路径格式一致，如 `src/main/java/com/tongji/auth/api/AuthController.java`）
+   - 同时在摘要末尾输出 `## subgroups（JSON）` 段，定义子模块划分（必须按业务职责归并，不要机械地每文件一组；**子模块数最多 5 个**（超过必须合并）；**当子模块数 ≥ 2 时，每个子模块必须包含 ≥ 2 个文件**，单文件必须并入职责相近的组，否则 `save_module_summary` 会返回错误；**files 字段必须使用完整相对路径**，与 explore_module 返回的路径格式一致，如 `src/main/java/com/tongji/auth/api/AuthController.java`）
    - 调用 `save_module_summary(module_name=<模块名>, summary=<生成的摘要（含 subgroups 段）>)`
    - 重新调用 `explore_module(module_name=<模块名>, verify_only=true)` 确认命中
 

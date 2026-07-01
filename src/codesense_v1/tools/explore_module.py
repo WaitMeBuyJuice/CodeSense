@@ -52,6 +52,7 @@ _EXPLORE_MODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "- 只需知道功能属于哪个模块（使用 project_map）\n"
         "- 需要查看具体子模块实现（使用 explore_submodule）\n\n"
         "返回模块级架构描述，不含具体代码实现。\n"
+        "传 `verify_only=true` 可获得轻量验证信号（缓存命中时 <100 字符），用于 cache miss 后的保存→验证流程。\n"
         "若缓存未就绪，工具会返回生成步骤，引导完成后重新调用。\n\n"
         "示例：\n"
         "- 用户问「cache 模块的作用？」→ explore_module(module_name=\"cache\")\n"

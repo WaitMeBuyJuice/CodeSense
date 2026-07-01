@@ -24,7 +24,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
-> 缓存未就绪时，工具返回体内嵌了初始化引导，按步骤完成后重新调用。
+> 缓存未就绪时，工具返回体内嵌初始化引导。按以下步骤处理（verify 规范见 SERVER_INSTRUCTIONS）：
 > **注意**：初始化时可能需要两次调用 `project_map`：第一次完成 01_identity 和 03_modules，第二次完成边界规则 / 流程 / 概念索引段。
 
 ---
@@ -44,7 +44,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 > `module_name` 是 `project_map` 中列出的模块英文 key（如 `cache`、`data`）。不知道有哪些模块时先做 Step 1。
 >
-> cache miss 时工具内嵌了推理 prompt，按 prompt 完成推理后调 `save_module_summary` 写回缓存。
+> cache miss 时工具内嵌了推理 prompt，按 prompt 完成推理后调 `save_module_summary` 写回缓存，再以 `verify_only=true` 重调 `explore_module` 验证缓存命中。
 
 ---
 
@@ -65,7 +65,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
-> cache miss 时同样内嵌 prompt，推理完毕后调 `save_submodule_summary` 写回缓存。
+> cache miss 时同样内嵌 prompt，推理完毕后调 `save_submodule_summary` 写回缓存，再以 `verify_only=true` 重调 `explore_submodule` 验证。
 
 ---
 
@@ -94,6 +94,8 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 | 理解某段逻辑 / 探索某区域 | `codegraph_explore` |
 | 已知文件路径 | 	`codegraph_node` / `read_file` |
 | 已知符号名 | `codegraph_node` |
+
+> 详细流程见上方「流程步骤」；缓存未就绪时的推理→save→verify 步骤见 SERVER_INSTRUCTIONS。
 
 ---
 
