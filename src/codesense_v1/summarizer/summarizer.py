@@ -820,6 +820,7 @@ async def get_submodule_prompt(
             subgroup_name=subgroup_name,
             subgroup_description=subgroup_description,
             subgroup_files=subgroup_files,
+            module_overview=cache.read_module(codesense_dir, cache.safe_key(module_name)) or "",
         )
 
     # Single-file mode (backward compatible)
@@ -862,6 +863,7 @@ async def get_submodule_prompt(
         in_files=sorted(in_files_set),
         out_modules=_map_files_to_modules(sorted(out_files_set), modules_list),
         in_modules=_map_files_to_modules(sorted(in_files_set), modules_list),
+        module_overview=cache.read_module(codesense_dir, cache.safe_key(module_name)) or "",
     )
 
 
@@ -1972,6 +1974,7 @@ def _build_submodule_prompt(
     subgroup_name: "str | None" = None,
     subgroup_description: "str | None" = None,
     subgroup_files: "list[str] | None" = None,
+    module_overview: str = "",
 ) -> str:
     """构造子模块摘要的 LLM prompt。
 
@@ -2022,6 +2025,14 @@ def _build_submodule_prompt(
         "",
         header_line,
         "",
+    ]
+    if module_overview:
+        lines += [
+            "## 模块总览（上下文，仅供参考，不要在输出中重复这些信息）",
+            module_overview,
+            "",
+        ]
+    lines += [
         "## 全部符号",
         "\n".join(all_symbols) or "（无）",
         "",
