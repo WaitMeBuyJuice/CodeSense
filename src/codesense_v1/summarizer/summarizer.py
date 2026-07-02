@@ -1675,6 +1675,7 @@ def _build_module_prompt(
         "  **若已有 subgroups 定义（见下方数据）**：必须严格按 subgroups 列表生成表格，不得增删合并；\n"
         "  **若无 subgroups**：按上述规则自行划分，不含 `__init__.py`；\n"
         "  子模块名格式：`<职责简短标识>`，**不含模块名前缀**（如 `storage`，不要写 `data_storage`）；单文件模块只有一行）\n\n"
+        "  **包含文件展示规则**：按目录分组展示。同一目录下 ≤3 个文件时逐个列出完整路径；>3 个文件时只列出目录路径并标注文件数与前 3 个文件名（示例：`src/main/java/com/tongji/auth/api/dto/`（10 个文件：AuthResponse、AuthUserResponse、LoginRequest 等））；分目录之间用顿号分隔。\n\n"
         "## 上下游关系\n"
         "（「上游」= 依赖此模块的模块；「下游」= 此模块依赖的模块；数据来自 imports 边，置信度 extracted）\n\n"
         "## 实现约束清单\n"
