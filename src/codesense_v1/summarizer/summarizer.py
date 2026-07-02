@@ -1299,13 +1299,9 @@ def _render_basic_architecture_segment(
         dirs = m.get("directories") or []
         files = m.get("files") or []
         if dirs:
-            # 有目录的模块：Agent 只写了一个顶层目录，直接显示；
-            # 若旧格式写了多个子目录，用 LCA 收敛到父目录
+            # 原样输出目录路径；多目录用逗号分隔（跨源码根场景不应被 LCA 塌缩）
             dirs_norm = [str(d).replace("\\", "/") for d in dirs]
-            if len(dirs_norm) == 1:
-                return dirs_norm[0]
-            lca = _lca_path(dirs_norm)
-            return lca if lca else dirs_norm[0]
+            return ", ".join(dirs_norm)
         # 单文件模块：显示文件路径
         meaningful = [f for f in files if not str(f).endswith("__init__.py")]
         return _truncate_paths(meaningful or files)
