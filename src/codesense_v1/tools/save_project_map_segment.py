@@ -19,7 +19,7 @@ from codesense_v1.data.config import get_ignore_paths
 from codesense_v1.data.hashes import _sha256
 from codesense_v1.errors import InvalidArgumentError
 from codesense_v1.registry import tool
-from codesense_v1.summarizer import _build_symbol_module_map, _resolve_roots_and_aux
+from codesense_v1.summarizer import _resolve_roots_and_aux
 from codesense_v1.tools._project_root import project_root_not_found_error, resolve_project_root
 
 _VALID_SEGMENT_IDS = (
@@ -130,13 +130,30 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
         elif segment_id == "06_concepts":  # 06_concepts
             modules_index = cache.read_modules_index(codesense_dir)
             saved_modules = (modules_index or {}).get("modules", [])
-            symbol_map = _build_symbol_module_map(saved_modules, db)
-            concepts_data = sorted(symbol_map.items())
             modules_desc = sorted(
                 (str(m.get("name", "")), str(m.get("description", "")))
                 for m in saved_modules if isinstance(m, dict)
             )
-            source_hash = _sha256(json.dumps(concepts_data + modules_desc))
+            # 与 project_map.py 保持一致：modules_desc + hash_03 联动
+            # 重算 hash_03（叶子目录 hash，应用 ignore 过滤）
+            _all_file_paths_06 = [f.path.replace("\\", "/") for f in db.iter_files()]
+            _roots_06, _ = _resolve_roots_and_aux(_all_file_paths_06, project_root)
+            _file_paths_l1_06 = [p for p in _all_file_paths_06 if any(p.startswith(r + "/") or p == r for r in _roots_06)]
+            _ignore_prefixes_06 = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
+            if _ignore_prefixes_06:
+                _file_paths_l1_06 = [
+                    p for p in _file_paths_l1_06
+                    if not any(p == ip or p.startswith(ip + "/") for ip in _ignore_prefixes_06)
+                ]
+            _all_parent_dirs_06 = {
+                fp.rsplit("/", 1)[0] for fp in _file_paths_l1_06 if "/" in fp
+            }
+            _current_leaf_dirs_06 = sorted({
+                d for d in _all_parent_dirs_06
+                if not any(other != d and other.startswith(d + "/") for other in _all_parent_dirs_06)
+            })
+            _hash_03_06 = compute_architecture_hash([_current_leaf_dirs_06])
+            source_hash = _sha256(json.dumps(modules_desc) + _hash_03_06)
 
     cache.write_segment(codesense_dir, segment_id, content, source_hash)
     return f"段落 `{segment_id}` 已保存（{len(content)} 字符）。重新调用 `project_map` 获取完整概览。"

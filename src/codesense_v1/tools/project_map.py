@@ -162,12 +162,13 @@ async def project_map(_nonce: str | None = None) -> str:
     )
     hash_05 = _sha256(json.dumps(calls_edges))
 
-    concepts_data = sorted(symbol_map.items())
     modules_desc = sorted(
         (str(m.get("name", "")), str(m.get("description", "")))
         for m in saved_modules if isinstance(m, dict)
     )
-    hash_06 = _sha256(json.dumps(concepts_data + modules_desc))
+    # 06_concepts 内容结构跟随模块划分，故 hash 跟随 modules_desc + hash_03 联动
+    # （03 失效 → 06 必失效；模块名/描述变化 → 06 失效）
+    hash_06 = _sha256(json.dumps(modules_desc) + hash_03)
 
     # ---- Generate pure-program segments immediately -------------------------
     if not _seg_valid(codesense_dir, "07_dependencies", hash_07, auto_expire):
