@@ -24,7 +24,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 **跳过条件**：若在未调用工具获取信息前，当前上下文已包含完成本层决策所需的信息，则跳过本层，否则按照codesense-flow Skiil流程获取所需信息。
 
-> 若result提示缓存失效，请自行抉择是否对project_map缓存进行重建，推荐重建获取最新信息
+> 若 result 提示缓存过期，**默认应重建缓存**（推理→save→verify）以获取最新信息；仅当任务是一次性快速探索、且改动很小时，才可临时用过期文档 + 源码补充。
 > **注意**：初始化时可能需要两次调用 `project_map`：第一次完成 01_identity 和 03_modules，第二次完成边界规则 / 流程 / 概念索引段。
 
 ---
@@ -44,7 +44,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 > `module_name` 是 `project_map` 中列出的模块英文 key（如 `cache`、`data`）。不知道有哪些模块时先做 Step 1。
 >
-> cache miss 时工具内嵌了推理 prompt，按 prompt 完成推理后调 `save_module_summary` 写回缓存，再以 `verify_only=true` 重调 `explore_module` 验证缓存命中。
+> cache miss 或缓存过期时，工具内嵌了推理 prompt，**默认应完成推理→`save_module_summary`→`verify_only=true` 验证的重建流程**；不要因为过期就直接跳去读源码。
 
 ---
 
@@ -65,7 +65,7 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 
 **跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
 
-> cache miss 时同样内嵌 prompt，推理完毕后调 `save_submodule_summary` 写回缓存，再以 `verify_only=true` 重调 `explore_submodule` 验证。
+> cache miss 或缓存过期时同理，**默认走重建流程**（推理→`save_submodule_summary`→verify），不要跳过重建直接读源码。
 
 ---
 

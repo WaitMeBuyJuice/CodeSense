@@ -44,11 +44,10 @@ description: >
 完成后输出确认：
 > ✅ 配置已写入 `.codesense/.codesense_config`，继续 Phase 1。
 
+> **进度确认**：若不确定当前初始化到哪个阶段，可先调用 `init_status()` 查看三阶段完成情况，再决定从哪里开始。
 ---
 
 ## Phase 1：生成 project_map（项目概览）
-
-> **进度确认**：若不确定当前初始化到哪个阶段，可先调用 `init_status()` 查看三阶段完成情况，再决定从哪里开始。
 
 ### 1.1 首次调用 project_map
 
