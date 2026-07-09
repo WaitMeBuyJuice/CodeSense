@@ -1,7 +1,7 @@
 ---
 name: codesense-flow
 description: >
-  适用场景：理解项目整体架构、模块职责、模块关系及功能归属、需要获取项目整体结构与模块功能组成等信息的探索类任务
+  适用场景：理解项目整体架构、模块职责、模块关系及功能归属等信息的探索类任务与模块功能修改、业务流程变更等代码修改类任务，优先激活该Skill。
   不适用场景：用户已明确给出文件路径、行号或具体符号名。
   激活后优先按"全局 → 模块 → 子模块 → 符号/原文"四层递进探索，满足跳过条件时可直接进入下一层。
 compatibility: Requires CodeSense MCP and CodeGraph MCP.
@@ -22,9 +22,9 @@ compatibility: Requires CodeSense MCP and CodeGraph MCP.
 - 项目的关键流程
 - 你要触及的功能大概落在哪个模块
 
-**跳过条件**：若当前上下文已包含完成本层决策所需的信息，则跳过本层。
+**跳过条件**：若在未调用工具获取信息前，当前上下文已包含完成本层决策所需的信息，则跳过本层，否则按照codesense-flow Skiil流程获取所需信息。
 
-> 缓存未就绪时，工具返回体内嵌初始化引导。按以下步骤处理（verify 规范见 SERVER_INSTRUCTIONS）：
+> 若result提示缓存失效，请自行抉择是否对project_map缓存进行重建，推荐重建获取最新信息
 > **注意**：初始化时可能需要两次调用 `project_map`：第一次完成 01_identity 和 03_modules，第二次完成边界规则 / 流程 / 概念索引段。
 
 ---
