@@ -177,8 +177,19 @@ async def explore_submodule(
         except Exception as exc:
             prompt_text = f"（提示词获取失败：{exc}）"
 
+        # 区分「完全缺失」和「缓存过期」
+        if cached_md is not None:
+            old_doc_note = (
+                f"\n旧文档仍可参考：`.codesense/modules/{mkey}/{file_key}.md`，生成时可作为基础修改。\n"
+            )
+            header = f"# 子模块「{subgroup_name}」缓存已过期，需重建文档\n"
+        else:
+            old_doc_note = ""
+            header = f"# 子模块「{subgroup_name}」尚未生成文档，必须按照以下步骤生成文档，自行判断使用哪种方式\n"
+
         return (
-            f"# 子模块「{subgroup_name}」尚未生成文档，必须按照以下步骤生成文档，自行判断使用哪种方式\n\n"
+            f"{header}\n"
+            f"{old_doc_note}"
             "## 方式 1：委派给子 Agent\n\n"
             "如果你的 Agent 框架支持子任务（如 `task` / `dispatch_subagent` / `Task` 工具），"
             "请创建一个子 Agent 并让它执行以下任务：\n\n"
@@ -241,8 +252,19 @@ async def explore_submodule(
     except Exception as exc:
         prompt_text = f"（提示词获取失败：{exc}）"
 
+    # 区分「完全缺失」和「缓存过期」
+    if cached_md is not None:
+        old_doc_note = (
+            f"\n旧文档仍可参考：`.codesense/modules/{mkey}/{file_key}.md`，生成时可作为基础修改。\n"
+        )
+        header = f"# 子模块「{file_path}」缓存已过期，需重建文档\n"
+    else:
+        old_doc_note = ""
+        header = f"# 子模块「{file_path}」尚未生成文档，必须按照以下步骤生成文档\n"
+
     return (
-        f"# 子模块「{file_path}」尚未生成文档，必须按照以下步骤生成文档\n\n"
+        f"{header}\n"
+        f"{old_doc_note}"
         "## 方式 1：委派给子 Agent（推荐，避免污染主对话上下文）\n\n"
         "如果你的 Agent 框架支持子任务（如 `task` / `dispatch_subagent` / `Task` 工具），"
         "请创建一个子 Agent 并让它执行以下任务：\n\n"

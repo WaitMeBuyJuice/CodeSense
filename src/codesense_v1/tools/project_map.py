@@ -229,8 +229,13 @@ async def project_map(_nonce: str | None = None) -> str:
         if seg_id in seg_prompts:
             prompt_section = f"\n\n### 分析提示词\n\n{seg_prompts[seg_id]}"
 
+        # 过期段提示旧文档路径
+        expired_note = ""
+        if cache.read_segment(codesense_dir, seg_id) is not None:
+            expired_note = f" ⚠️ 缓存已过期\n\n旧文档仍可参考：`.codesense/project_map_segments/{seg_id}.md`，生成时可作为基础修改。"
+
         steps.append(
-            f"## 步骤 {i+1}：{seg_id}（{desc}）{dep_str}\n\n"
+            f"## 步骤 {i+1}：{seg_id}（{desc}）{expired_note}{dep_str}\n\n"
             f"生成后调用 {save_call} 保存。"
             f"{prompt_section}"
         )
