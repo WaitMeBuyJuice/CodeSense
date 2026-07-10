@@ -805,13 +805,18 @@ async def get_submodule_prompt(
 
             out_files_set: set[str] = set()
             in_files_set: set[str] = set()
-            for edge in db.iter_edges(kinds=("imports", "calls")):
+            all_edges_list = list(db.iter_edges(kinds=("imports", "calls")))
+            for edge in all_edges_list:
                 src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
                 tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
                 if src_file in file_set and edge.kind == "imports" and tgt_file not in file_set:
                     out_files_set.add(tgt_file)
                 if tgt_file in file_set and edge.kind == "imports" and src_file not in file_set:
                     in_files_set.add(src_file)
+
+        calls_skeleton = _build_calls_skeleton(
+            file_set, node_id_to_file, all_edges_list, file_nodes
+        )
 
         return _build_submodule_prompt(
             module_entry=entry,
@@ -828,6 +833,7 @@ async def get_submodule_prompt(
             subgroup_description=subgroup_description,
             subgroup_files=subgroup_files,
             module_overview=cache.read_module(codesense_dir, cache.safe_key(module_name)) or "",
+            calls_skeleton=calls_skeleton,
         )
 
     # Single-file mode (backward compatible)
@@ -851,13 +857,18 @@ async def get_submodule_prompt(
 
         out_files_set = set()
         in_files_set = set()
-        for edge in db.iter_edges(kinds=("imports", "calls")):
+        all_edges_list = list(db.iter_edges(kinds=("imports", "calls")))
+        for edge in all_edges_list:
             src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
             tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
             if src_file == file_path and edge.kind == "imports":
                 out_files_set.add(tgt_file)
             if tgt_file == file_path and edge.kind == "imports":
                 in_files_set.add(src_file)
+
+    calls_skeleton = _build_calls_skeleton(
+        {file_path}, node_id_to_file, all_edges_list, file_nodes
+    )
 
     return _build_submodule_prompt(
         module_entry=entry,
@@ -871,6 +882,7 @@ async def get_submodule_prompt(
         out_modules=_map_files_to_modules(sorted(out_files_set), modules_list),
         in_modules=_map_files_to_modules(sorted(in_files_set), modules_list),
         module_overview=cache.read_module(codesense_dir, cache.safe_key(module_name)) or "",
+        calls_skeleton=calls_skeleton,
     )
 
 
@@ -1955,6 +1967,89 @@ def _is_single_file_module(entry: dict) -> bool:
     return len(py_files) <= 1
 
 
+def _extract_overview_lite(module_overview: str) -> str:
+    """从 module_overview.md 提取「一句话定位」+「子模块列表（去文件清单）」两段，
+    作为子模块 prompt 的轻量上下文，避免注入完整 overview（可从 ~5KB 降到 ~500B）。
+    """
+    if not module_overview:
+        return ""
+    lines = module_overview.split("\n")
+    out: list[str] = []
+    in_positioning = False
+    in_subgroups = False
+    for line in lines:
+        stripped = line.strip()
+        # 「一句话定位」段
+        if stripped.startswith("## 一句话定位"):
+            in_positioning = True
+            in_subgroups = False
+            out.append(line)
+            continue
+        # 「子模块列表」段
+        if stripped.startswith("## 子模块列表"):
+            in_positioning = False
+            in_subgroups = True
+            out.append(line)
+            continue
+        # 其他 H2 段：停止收集
+        if stripped.startswith("## "):
+            in_positioning = False
+            in_subgroups = False
+            continue
+        if in_positioning:
+            out.append(line)
+        elif in_subgroups:
+            # 子模块列表：保留但去掉「包含文件」列（第 3 列）
+            # 表格行示例：`| api | 说明 | src/... |`
+            if line.count("|") >= 3 and stripped.startswith("|"):
+                parts = [p.strip() for p in line.split("|")]
+                # parts 结构：['', '子模块名', '职责', '包含文件', '']
+                if len(parts) >= 5:
+                    out.append(f"| {parts[1]} | {parts[2]} |")
+                    continue
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def _build_calls_skeleton(
+    file_set: set[str],
+    node_id_to_file: dict[str, str],
+    all_edges: list,
+    file_nodes: list,
+) -> str:
+    """从 CodeGraph calls edges 抽取本子模块内的主要调用链骨架，
+    减少 Agent 手动 read_file 探索调用关系的 token 消耗。
+
+    只保留 source 在本子模块文件内的调用边；target 若也在本子模块则用简名（file:name），
+    否则用完整符号名标注为跨子模块调用。
+    """
+    node_id_to_name: dict[str, str] = {n.id: n.name for n in file_nodes}
+    lines: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for edge in all_edges:
+        if getattr(edge, "kind", "") != "calls":
+            continue
+        src_file = node_id_to_file.get(edge.source, "").replace("\\", "/")
+        if src_file not in file_set:
+            continue
+        tgt_file = node_id_to_file.get(edge.target, "").replace("\\", "/")
+        src_name = node_id_to_name.get(edge.source, edge.source)
+        # target 名字：优先用 node_id_to_name（若 target 是子模块内节点），否则用 target 本身（可能是外部符号名）
+        tgt_name = node_id_to_name.get(edge.target, edge.target)
+        key = (src_name, tgt_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        marker = "" if tgt_file in file_set else " (跨子模块)"
+        lines.append(f"- `{src_name}` → `{tgt_name}`{marker}")
+    if not lines:
+        return ""
+    # 限制条数避免过长（超过 40 条时保留前 40，加省略提示）
+    if len(lines) > 40:
+        lines = lines[:40] + [f"- ...（共 {len(seen)} 条边，仅列前 40）"]
+    return "\n".join(lines)
+
+
 def _build_submodule_prompt(
     module_entry: dict,
     file_path: str,
@@ -1971,6 +2066,7 @@ def _build_submodule_prompt(
     subgroup_description: "str | None" = None,
     subgroup_files: "list[str] | None" = None,
     module_overview: str = "",
+    calls_skeleton: str = "",
 ) -> str:
     """构造子模块摘要的 LLM prompt。
 
@@ -2023,11 +2119,13 @@ def _build_submodule_prompt(
         "",
     ]
     if module_overview:
-        lines += [
-            "## 模块总览（上下文，仅供参考，不要在输出中重复这些信息）",
-            module_overview,
-            "",
-        ]
+        overview_lite = _extract_overview_lite(module_overview)
+        if overview_lite:
+            lines += [
+                "## 模块总览（精简版：定位 + 子模块列表，仅供参考，不要在输出中重复）",
+                overview_lite,
+                "",
+            ]
     lines += [
         "## 全部符号",
         "\n".join(all_symbols) or "（无）",
@@ -2045,6 +2143,13 @@ def _build_submodule_prompt(
         "（参考：原始出向文件）",
         "\n".join(f"- `{f}`" for f in resolved_out) or "（无）",
     ]
+    # 内部调用链骨架（从 CodeGraph calls 边预抽取，减少 Agent read_file 成本）
+    if calls_skeleton:
+        lines += [
+            "",
+            "## 内部调用链骨架（基于 calls 边预抽取，用于生成「典型调用链」段落时参考）",
+            calls_skeleton,
+        ]
     if ref_docs_section:
         lines += ["", "## 参考文档", ref_docs_section]
 
@@ -2068,7 +2173,7 @@ def _build_submodule_prompt(
         "  格式：「下游：X, Y」「上游：A, B」；无则写「无」）",
         "",
         "## 典型调用链",
-        "（2-3 条关键调用路径，每条用三级标题命名，下方简短描述；数据不足可省略）",
+        "（2-3 条关键调用路径，每条用三级标题命名，下方简短描述；优先参考上方「内部调用链骨架」组织路径，无需大量 read_file；数据不足可省略）",
         "### 调用链名称",
         "描述……",
     ]
