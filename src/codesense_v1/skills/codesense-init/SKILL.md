@@ -125,7 +125,7 @@ description: >
 
 ## Phase 3：生成子模块文档
 
-对 Phase 2 中处理过的每个**多子模块**模块，**每个模块派发 1 个子 Agent** 批处理其全部子模块，避免重复读取共享文件。
+对 Phase 2 中处理过的每个**多子模块**模块，**每个模块调用一次 `explore_submodule(..., batch=true)`** 一次性获取该模块所有子模块的批量生成 prompt。批量模式共享 module_overview 上下文、内置调用链骨架，token 消耗比单模块调用低 ~75%。
 
 **子模块来源**：
 - 从 Phase 2 生成的模块文档「子模块列表」中获取所有子模块名（如 `storage`、`api`）
@@ -134,31 +134,27 @@ description: >
 
 为每个模块创建 1 个子 Agent，传入以下任务清单：
 
-> 你是负责生成模块 `<模块名>` 全部子模块文档的子 Agent。该模块包含子模块：`<sub1>`、`<sub2>`……
+> 你是负责生成模块 `<模块名>` 全部子模块文档的子 Agent。
 >
 > **注意**：`explore_submodule`、`save_submodule_summary` 工具已在 CodeSense MCP 服务器注册；若子 Agent 环境中已连接该服务器，可直接调用，无需重新激活。
 >
-> 依次处理每个子模块：
-> 1. 调用 `explore_submodule(module_name="<模块名>", subgroup_name="<子模块名>")`
-> 2. 若缓存命中 → 跳过，处理下一个
-> 3. 若返回"尚未生成文档"（cache miss）：
->    - 按返回的分析提示词生成子模块 Markdown 文档，包含：
->      - 子模块概述
->      - 对外能力（该子模块对外提供什么能力；不列函数签名）
->      - 跨模块依赖（上游/下游模块名）
->      - 典型调用链（每条用三级标题命名）
->    - 调用 `save_submodule_summary(module_name="<模块名>", subgroup_name="<子模块名>", summary=<生成的文档>)`
->    - 调用 `explore_submodule(module_name="<模块名>", subgroup_name="<子模块名>", verify_only=true)` 确认命中
-> 4. 全部完成后回复"已完成"
+> 1. 调用 `explore_submodule(module_name="<模块名>", batch=true)`
+>    - 若返回「批量模式不适用」（子模块数 < 2）→ 该模块跳过 Phase 3
+>    - 否则获取批量分析提示词，包含该模块所有子模块的独立数据段
+> 2. 按提示词为每个子模块生成一份 Markdown 文档（4 章节：子模块概述、对外能力、跨模块依赖、典型调用链）
+> 3. **循环保存**：对每个子模块调用一次 `save_submodule_summary(module_name="<模块名>", subgroup_name="<子模块名>", summary=<对应文档>)`
+> 4. **循环验证**：全部保存完毕后，对每个子模块调用一次 `explore_submodule(module_name="<模块名>", subgroup_name="<子模块名>", verify_only=true)` 确认缓存命中
+> 5. 回复"已完成"
 
 **优势**：
-- 共享文件（如 `db.py`、`modules.py`）只读取一次
-- 子 Agent 启动次数 = 模块数（不是子模块数）
-- 同模块内子模块上下文连贯，文档风格统一
+- 共享 module_overview 上下文只加载一次（原 N 次子模块调用 → 1 次批量调用）
+- 内置 CodeGraph calls 调用链骨架，减少 Agent 手动 read_file
+- 一次 explore_submodule 调用即可拿到该模块所有子模块的数据
 
-**小模块例外**：若某模块的子模块数 ≤ 2，由主 Agent 直接处理，不派发子 Agent。
+**小模块例外**：
+- 若某模块的子模块数 ≤ 2，`batch=true` 会返回「批量模式不适用」；此时改用普通模式（`subgroup_name=<name>`）逐个生成
 
-> 例：`errors`（1 个子模块）、`config`（2 个子模块）属于小模块，直接处理；`auth`（4 个子模块）、`data`（5 个子模块）则应派发子 Agent。
+> 例：`errors`（1 个子模块）、`config`（2 个子模块）属于小模块，用普通模式；`auth`（4 个子模块）、`data`（5 个子模块）使用 batch=true。
 
 ---
 

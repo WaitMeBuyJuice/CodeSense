@@ -34,6 +34,10 @@ _EXPLORE_SUBMODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
             "type": "boolean",
             "description": "true 时命中缓存仅返回轻量确认信号（<100 字符），用于保存后的验证步骤；默认 false 返回完整文档",
         },
+        "batch": {
+            "type": "boolean",
+            "description": "true 时忽略 subgroup_name/file_path，一次性返回整个模块所有子模块的批量生成 prompt（共享 overview 上下文，减少 token 消耗）。适合首次冷启动或某模块所有子模块缓存缺失时使用。默认 false。",
+        },
     },
     "required": ["module_name"],
     "additionalProperties": False,
@@ -54,7 +58,8 @@ _EXPLORE_SUBMODULE_INPUT_SCHEMA: Final[dict[str, object]] = {
         "参数说明：\n"
         "- module_name 必须是 project_map 返回的模块名之一\n"
         "- subgroup_name（优先）：从 explore_module 返回的「子模块列表」中取（如 data_storage）\n"
-        "- file_path（备用）：若模块尚未定义 subgroups，可用文件相对路径（以项目根目录为基准，与 explore_module 返回的文件路径格式一致）\n\n"
+        "- file_path（备用）：若模块尚未定义 subgroups，可用文件相对路径（以项目根目录为基准，与 explore_module 返回的文件路径格式一致）\n"
+        "- batch=true：一次性获取该模块所有子模块的批量生成 prompt（共享 overview 上下文）；适合冷启动或多个子模块均缓存缺失时使用；不与 subgroup_name/file_path 同时使用\n\n"
         "传 `verify_only=true` 可获得轻量验证信号（缓存命中时 <100 字符），用于 cache miss 后的保存→验证流程。\n"
         "若缓存未就绪，工具会返回生成步骤，引导完成后重新调用。"
     ),
@@ -65,6 +70,7 @@ async def explore_submodule(
     file_path: str = "",
     subgroup_name: str | None = None,
     verify_only: bool = False,
+    batch: bool = False,
 ) -> str:
     module_name = module_name.strip()
     file_path = file_path.strip().replace("\\", "/")
@@ -73,9 +79,9 @@ async def explore_submodule(
         raise InvalidArgumentError(
             "参数错误：module_name 不能为空。"
         )
-    if subgroup_name is None and not file_path:
+    if not batch and subgroup_name is None and not file_path:
         raise InvalidArgumentError(
-            "参数错误：file_path 和 subgroup_name 至少提供一个。"
+            "参数错误：file_path 和 subgroup_name 至少提供一个（或传 batch=true 批量生成）。"
         )
 
     project_root = await resolve_project_root()
@@ -126,6 +132,41 @@ async def explore_submodule(
 
     name = str(entry.get("name", module_name))
     mkey = cache.safe_key(module_name)
+
+    # ── Batch mode: 一次性返回该模块所有子模块的批量生成 prompt ─────────────
+    if batch:
+        subgroups_raw = entry.get("subgroups") or []
+        subgroups = [sg for sg in subgroups_raw if isinstance(sg, dict)]
+        if len(subgroups) < 2:
+            return (
+                f"# 批量模式不适用\n\n"
+                f"模块「{name}」只有 {len(subgroups)} 个子模块（<2），"
+                f"批量生成的收益不足。请使用普通模式（不传 batch）逐个生成。"
+            )
+        try:
+            batch_prompt, sg_names = await summarizer.get_submodule_prompt_batch(project_root, name)
+        except Exception as exc:
+            return f"# 错误\n\n批量 prompt 获取失败：{exc}"
+        sg_list_str = "、".join(f"`{n}`" for n in sg_names)
+        return (
+            f"# 模块「{name}」批量生成 {len(sg_names)} 个子模块文档\n\n"
+            f"子模块列表：{sg_list_str}\n\n"
+            "## 推荐执行方式\n\n"
+            "**方式 1**：委派给子 Agent（推荐，避免污染主对话上下文）\n\n"
+            f"> 你是负责生成模块「{name}」所有子模块文档的子 Agent。按下方「批量分析提示词」中的要求，"
+            f"为每个子模块生成一份 Markdown 文档，然后对每个子模块调用一次 "
+            f"`save_submodule_summary(module_name=\"{name}\", subgroup_name=\"<子模块名>\", summary=<文档>)` 保存。\n"
+            f"> 全部保存完毕后回复\"已完成\"。\n\n"
+            f"子 Agent 完成后，主 Agent 对每个子模块调用一次 "
+            f"`explore_submodule(module_name=\"{name}\", subgroup_name=\"<子模块名>\", verify_only=True)` 验证。\n\n"
+            "**方式 2**：主 Agent 直接执行\n\n"
+            f"1. 按批量分析提示词生成 {len(sg_names)} 份文档\n"
+            f"2. 循环调用 `save_submodule_summary(...)` 保存每个子模块\n"
+            f"3. 循环调用 `explore_submodule(..., verify_only=True)` 验证\n\n"
+            "---\n\n"
+            "## 批量分析提示词\n\n"
+            f"{batch_prompt}\n"
+        )
 
     if subgroup_name is not None:
         subgroup_name = subgroup_name.replace("/", "_").replace("\\", "_").replace("..", "__")

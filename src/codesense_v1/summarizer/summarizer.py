@@ -2180,6 +2180,179 @@ def _build_submodule_prompt(
     return "\n".join(lines)
 
 
+async def get_submodule_prompt_batch(
+    project_root: Path,
+    module_name: str,
+) -> "tuple[str, list[str]]":
+    """构造整个模块内所有子模块文档的**批量** prompt。
+
+    返回: (batch_prompt, subgroup_names_list)
+    - batch_prompt: 一份合并的 prompt，共享 module_overview_lite 一次，各子模块的 nodes/edges/skeleton 单独列出
+    - subgroup_names_list: 该模块的所有 subgroup 名称，便于 Agent 循环 save
+    """
+    codesense_dir = project_root / _CODESENSE_DIR_NAME
+
+    index = cache.read_modules_index(codesense_dir)
+    if index is None:
+        raise InvalidArgumentError(
+            "参数错误：尚未生成模块划分，请先调用 project_map 生成模块划分"
+        )
+    raw_modules = index.get("modules")
+    modules_list: list[dict[str, object]] = (
+        [m for m in raw_modules if isinstance(m, dict)]
+        if isinstance(raw_modules, list)
+        else []
+    )
+    norm_name = module_name.strip().lower()
+    entry: dict[str, object] | None = None
+    for m in modules_list:
+        if str(m.get("name", "")).strip().lower() == norm_name:
+            entry = m
+            break
+    if entry is None:
+        available = [str(m.get("name", "")) for m in modules_list]
+        raise InvalidArgumentError(
+            f"参数错误：模块 '{module_name}' 不存在。可用模块：{', '.join(available)}"
+        )
+
+    subgroups_raw = entry.get("subgroups") or []
+    subgroups = [sg for sg in subgroups_raw if isinstance(sg, dict)]
+    if len(subgroups) < 2:
+        raise InvalidArgumentError(
+            f"参数错误：模块「{module_name}」只有 {len(subgroups)} 个子模块，"
+            f"不适合批量生成。请使用普通模式（不传 batch）。"
+        )
+
+    # 共享上下文：module_overview_lite
+    module_overview_full = cache.read_module(codesense_dir, cache.safe_key(module_name)) or ""
+    overview_lite = _extract_overview_lite(module_overview_full)
+
+    # 一次性从 DB 读取所有 subgroup 需要的数据（避免 N 次连接）
+    subgroup_data: list[dict] = []
+    with CodeGraphDB(project_root) as db:
+        # 全局 node_id_to_file
+        node_id_to_file: dict[str, str] = {}
+        for node in db.iter_nodes():
+            node_id_to_file[node.id] = node.file_path.replace("\\", "/")
+        # 全局 edges 只读一次
+        all_edges_list = list(db.iter_edges(kinds=("imports", "calls")))
+        # 全局 nodes 也只读一次
+        all_public_nodes = list(db.iter_nodes(kinds=("function", "class", "method")))
+
+        for sg in subgroups:
+            sg_name = str(sg.get("name", ""))
+            sg_desc = str(sg.get("description", ""))
+            sg_files = [str(f).replace("\\", "/") for f in (sg.get("files") or [])]
+            file_set = set(sg_files)
+
+            file_nodes = [n for n in all_public_nodes if n.file_path.replace("\\", "/") in file_set]
+
+            out_files_set: set[str] = set()
+            in_files_set: set[str] = set()
+            for edge in all_edges_list:
+                src_file = node_id_to_file.get(edge.source, edge.source).replace("\\", "/")
+                tgt_file = node_id_to_file.get(edge.target, edge.target).replace("\\", "/")
+                if src_file in file_set and edge.kind == "imports" and tgt_file not in file_set:
+                    out_files_set.add(tgt_file)
+                if tgt_file in file_set and edge.kind == "imports" and src_file not in file_set:
+                    in_files_set.add(src_file)
+
+            calls_skeleton = _build_calls_skeleton(
+                file_set, node_id_to_file, all_edges_list, file_nodes
+            )
+
+            out_files_sorted = sorted(out_files_set)
+            in_files_sorted = sorted(in_files_set)
+            subgroup_data.append({
+                "name": sg_name,
+                "description": sg_desc,
+                "files": sg_files,
+                "file_nodes": file_nodes,
+                "out_files": out_files_sorted,
+                "in_files": in_files_sorted,
+                "out_modules": _map_files_to_modules(out_files_sorted, modules_list),
+                "in_modules": _map_files_to_modules(in_files_sorted, modules_list),
+                "calls_skeleton": calls_skeleton,
+            })
+
+    # 组装 batch prompt
+    lines: list[str] = [
+        f"# 批量生成模块「{module_name}」的所有子模块文档",
+        "",
+        f"本模块共 {len(subgroups)} 个子模块，需分别生成文档并逐个保存。",
+        "",
+        "## 共享上下文：模块总览（精简版，仅供参考，不要在输出中重复）",
+        overview_lite or "（无）",
+        "",
+        "---",
+        "",
+    ]
+
+    for i, sg in enumerate(subgroup_data):
+        lines.append(f"## 子模块 {i+1}：`{sg['name']}` — {sg['description']}")
+        lines.append(f"包含文件：{', '.join(sg['files'])}")
+        lines.append("")
+
+        # 全部符号
+        all_symbols = [
+            f"- `{n.name}` ({n.kind}): {n.signature or ''}"
+            for n in sg["file_nodes"]
+            if n.kind in ("function", "class", "method")
+        ]
+        public_symbols = [
+            f"- `{n.name}` ({n.kind}): {n.signature or ''}"
+            for n in sg["file_nodes"]
+            if not n.name.startswith("_") and n.kind in ("function", "class", "method")
+        ]
+        lines.append("### 全部符号")
+        lines.append("\n".join(all_symbols) or "（无）")
+        lines.append("")
+        lines.append("### 对外接口候选（非下划线开头）")
+        lines.append("\n".join(public_symbols) or "（无公开符号，请在输出中注明「仅供内部调用」）")
+        lines.append("")
+        lines.append("### 跨模块依赖（已映射为模块名）")
+        lines.append("下游（此子模块依赖的模块）：")
+        lines.append("\n".join(f"- `{m}`" for m in sg["out_modules"]) or "（无）")
+        lines.append("")
+        lines.append("上游（依赖此子模块的模块）：")
+        lines.append("\n".join(f"- `{m}`" for m in sg["in_modules"]) or "（无）")
+        lines.append("")
+        if sg["calls_skeleton"]:
+            lines.append("### 内部调用链骨架（用于生成「典型调用链」段落时参考）")
+            lines.append(sg["calls_skeleton"])
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    lines += [
+        "## 输出与保存要求",
+        "",
+        f"对上述 {len(subgroups)} 个子模块**每个**生成一份 Markdown 文档，格式如下（严格 4 章节）：",
+        "",
+        "```",
+        "## 子模块概述",
+        "（2-3 句话说明该子模块的业务职责）",
+        "",
+        "## 对外能力",
+        "（该子模块对外提供什么能力；",
+        "  内部工具模块：描述关键类/函数的用途，不列函数签名；",
+        "  接口模块：以表格列出 API 端点/MCP 工具名/事件；",
+        "  完全内部模块：写「仅供模块内部调用」）",
+        "",
+        "## 跨模块依赖",
+        "（格式：「下游：X, Y」「上游：A, B」；无则写「无」）",
+        "",
+        "## 典型调用链",
+        "（2-3 条关键调用路径，优先参考「内部调用链骨架」组织，无需大量 read_file）",
+        "```",
+        "",
+        f"**保存**：对每个子模块调用一次 `save_submodule_summary(module_name=\"{module_name}\", subgroup_name=\"<子模块名>\", summary=<对应文档>)`；",
+        f"待 {len(subgroups)} 个子模块全部保存完毕后，再对每个子模块调用一次 `explore_submodule(module_name=\"{module_name}\", subgroup_name=\"<子模块名>\", verify_only=True)` 验证缓存命中。",
+    ]
+
+    return "\n".join(lines), [str(sg.get("name", "")) for sg in subgroups]
+
+
 def save_submodule_summary(
     project_root: Path,
     module_name: str,
