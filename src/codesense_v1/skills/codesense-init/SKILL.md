@@ -151,10 +151,24 @@ description: >
 - 内置 CodeGraph calls 调用链骨架，减少 Agent 手动 read_file
 - 一次 explore_submodule 调用即可拿到该模块所有子模块的数据
 
-**小模块例外**：
-- 若某模块的子模块数 ≤ 2，`batch=true` 会返回「批量模式不适用」；此时改用普通模式（`subgroup_name=<name>`）逐个生成
+**批量模式使用建议**：
 
-> 例：`errors`（1 个子模块）、`config`（2 个子模块）属于小模块，用普通模式；`auth`（4 个子模块）、`data`（5 个子模块）使用 batch=true。
+| 子模块数 | 推荐模式 | 说明 |
+|---------|---------|------|
+| 1 个 | 普通模式 | `batch=true` 会返回「批量模式不适用」，只能用普通模式 |
+| 2 个 | 可选 | 技术上支持 batch，但共享上下文的收益不明显，可自行选择（普通模式也可） |
+| ≥ 3 个 | **推荐 `batch=true`** | 共享 overview + 一次 DB 读取的优势明显，token 节省显著 |
+
+> 例：`errors`（1 个子模块）用普通模式；`config`（2 个子模块）任选；`auth`（4 个子模块）、`data`（5 个子模块）用 `batch=true`。
+
+**单子模块跨模块批处理策略**（优化冷启动）：
+
+若项目中存在**多个只有 1 个子模块的模块**（Phase 3 中它们的 batch=true 都失效，需逐个走普通模式），推荐：
+
+- 派**一个子 Agent 跨模块批处理这些单子模块的模块**：让该子 Agent 依次调 `explore_submodule(module_name=<M>, subgroup_name=<sg>)` → 生成 → save → verify，覆盖所有这些「1 子模块的模块」
+- 避免每个模块单独派一个子 Agent，减少子 Agent 启动开销
+
+> 例：若 `errors`、`registry`、`server` 三个模块各只有 1 个子模块，用 1 个子 Agent 处理这 3 个模块，而不是启 3 个子 Agent。
 
 ---
 
