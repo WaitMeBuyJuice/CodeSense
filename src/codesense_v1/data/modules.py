@@ -128,6 +128,54 @@ def _resolve_relative_path(source_file: str, relative: str) -> str:
     return "/".join(parts)
 
 
+def _match_dotted(dotted: str, project_resolve_ids: set[str]) -> str | None:
+    """Match a dotted module name against project resolve_ids.
+
+    Exact match first; then, for multi-segment names, a *unique* suffix match to
+    tolerate source-layout root prefixes (e.g. import `pkg.sub` resolving to a
+    resolve_id `src.pkg.sub`). Single-segment names use exact match only, to
+    avoid coincidental collisions with external top-level packages.
+    """
+    if dotted in project_resolve_ids:
+        return dotted
+    if "." in dotted:
+        suffix = "." + dotted
+        matches = [rid for rid in project_resolve_ids if rid.endswith(suffix)]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _import_candidates(node: NodeRow) -> list[str]:
+    """Candidate imported dotted module names for a placeholder import node.
+
+    CodeGraph records `from pkg import sub` as a placeholder node named only
+    `pkg`, so the real imported sub-module (`pkg.sub`) lives in the signature.
+    We derive candidates from the signature (absolute `from X import ...` only)
+    plus the node name itself. Relative imports are left to other handling.
+    """
+    cands: list[str] = []
+    sig = (node.signature or "").strip()
+    marker = " import "
+    if sig.startswith("from ") and marker in sig:
+        pkg = sig[len("from ") : sig.index(marker)].strip()
+        if pkg and not pkg.startswith("."):  # absolute imports only
+            imported = sig[sig.index(marker) + len(marker) :].strip().strip("()").strip()
+            for part in imported.split(","):
+                token = part.strip().split(" as ")[0].strip()
+                if token and token != "*":
+                    cands.append(f"{pkg}.{token}")
+    if node.name:
+        cands.append(node.name)
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in cands:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
 def _resolve_internal_import(
     import_name: str,
     source_file: str,
@@ -151,14 +199,16 @@ def _resolve_internal_import(
             return f"{resolved}/index"
         return None
 
-    # Dotted-name style (Python).
-    if import_name in project_resolve_ids:
-        return import_name
+    # Dotted-name style (Python). Try the full name, then progressively
+    # shorter prefixes (a symbol import like `pkg.sub.func` → module `pkg.sub`).
+    matched = _match_dotted(import_name, project_resolve_ids)
+    if matched is not None:
+        return matched
     parts = import_name.split(".")
     for i in range(len(parts) - 1, 0, -1):
-        candidate = ".".join(parts[:i])
-        if candidate in project_resolve_ids:
-            return candidate
+        matched = _match_dotted(".".join(parts[:i]), project_resolve_ids)
+        if matched is not None:
+            return matched
     return None
 
 
@@ -243,18 +293,22 @@ def module_dependencies(
                 emit(src_fid, file_id_by_path[tgt_path], "imports", external=False)
                 continue
 
-            # Fallback: legacy bare-import placeholder — match by name
-            # (dotted / relative path) for older indexes and edge cases.
-            imported_name = tgt_node.name
-            internal_rid = _resolve_internal_import(
-                imported_name, src_node.file_path, project_resolve_ids
-            )
-            if internal_rid is not None:
-                tgt_fid = file_id_by_resolve_id.get(internal_rid)
-                if tgt_fid is not None:
-                    emit(src_fid, tgt_fid, "imports", external=False)
-            elif include_external:
-                emit(src_fid, imported_name, "imports", external=True)
+            # Fallback: placeholder import node (kind == "import"). Resolve by
+            # candidate module names derived from the node name and its import
+            # signature — CodeGraph records `from pkg import sub` as a node named
+            # only `pkg`, so the real sub-module comes from the signature.
+            resolved_any = False
+            for cand in _import_candidates(tgt_node):
+                internal_rid = _resolve_internal_import(
+                    cand, src_node.file_path, project_resolve_ids
+                )
+                if internal_rid is not None:
+                    tgt_fid = file_id_by_resolve_id.get(internal_rid)
+                    if tgt_fid is not None and tgt_fid != src_fid:
+                        emit(src_fid, tgt_fid, "imports", external=False)
+                        resolved_any = True
+            if not resolved_any and include_external:
+                emit(src_fid, tgt_node.name, "imports", external=True)
 
     if include_calls:
         # Only trust calls edges where:

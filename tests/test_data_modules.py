@@ -79,6 +79,69 @@ def test_module_dependencies_external(minimal_db_root: Path) -> None:
     assert "os" in ext_targets
 
 
+def _build_srclayout_pkg_import_db(root: Path) -> None:
+    """Build a src-layout DB where server.py does `from pkg import skills`.
+
+    CodeGraph records this as a placeholder import node named only `pkg`
+    (real sub-module `skills` lives in the signature), and file paths carry a
+    `src/` root prefix that the import namespace omits.
+    """
+    db_path = root / ".codegraph" / "codegraph.db"
+    db_path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE files (path TEXT PRIMARY KEY, language TEXT, size INTEGER, node_count INTEGER);
+        CREATE TABLE nodes (
+            id TEXT PRIMARY KEY, kind TEXT, name TEXT, qualified_name TEXT,
+            file_path TEXT, language TEXT, start_line INTEGER, end_line INTEGER, signature TEXT
+        );
+        CREATE TABLE edges (source TEXT, target TEXT, kind TEXT, line INTEGER);
+        """
+    )
+    conn.executemany(
+        "INSERT INTO files VALUES (?, ?, ?, ?)",
+        [
+            ("src/pkg/server/server.py", "python", 100, 2),
+            ("src/pkg/skills/__init__.py", "python", 50, 1),
+        ],
+    )
+    conn.executemany(
+        "INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("n-srv-file", "file", "server", "server", "src/pkg/server/server.py", "python", 1, 10, None),
+            # placeholder import node: name is only the top package `pkg`
+            ("n-srv-import", "import", "pkg", "pkg", "src/pkg/server/server.py", "python", 1, 1, "from pkg import skills"),
+            ("n-skills-init", "file", "__init__", "__init__", "src/pkg/skills/__init__.py", "python", 1, 5, None),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO edges VALUES (?, ?, ?, ?)",
+        ("n-srv-file", "n-srv-import", "imports", 1),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_module_dependencies_package_import_via_signature(tmp_path: Path) -> None:
+    # Regression: `from pkg import skills` must resolve to skills/__init__.py
+    # (via signature parsing) despite the src-layout root prefix, not be dropped
+    # as an external dependency.
+    _build_srclayout_pkg_import_db(tmp_path)
+    with CodeGraphDB(tmp_path) as db:
+        edges = module_dependencies(db)
+    internal = [e for e in edges if not e.is_external]
+    assert any(
+        e.source == "src/pkg/server/server.py"
+        and e.target == "src/pkg/skills/__init__.py"
+        and e.kind == "imports"
+        for e in internal
+    )
+    # And it must NOT leak as an external `pkg` dependency.
+    external_targets = {e.target for e in edges if e.is_external}
+    assert "pkg" not in external_targets
+
+
 def test_to_file_dependency_dict_sorted(minimal_db_root: Path) -> None:
     with CodeGraphDB(minimal_db_root) as db:
         edges = module_dependencies(db)
