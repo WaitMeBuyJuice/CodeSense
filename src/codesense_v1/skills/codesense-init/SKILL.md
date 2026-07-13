@@ -3,7 +3,7 @@ name: codesense-init
 description: >
   适用场景：用户需要为项目初始化 CodeSense 知识文档，或在缓存全部失效后重新生成。
   不适用场景：知识文档已存在且有效、只需查询项目结构（使用 codesense-flow）。
-  激活后按"project_map 初始化 → 模块文档 → 子模块文档"三阶段引导完成全量知识文档生成。
+  激活后按"project_map 初始化 → 模块文档 → 子模块文档 → Review 自校"引导完成全量知识文档生成。
 ---
 
 # CodeSense 知识文档初始化工作流
@@ -172,6 +172,35 @@ description: >
 
 ---
 
+## Phase 4：Review 自校（内容正确性）
+
+Phase 1–3 完成后，对已生成的知识文档做一轮内容核对与修正。
+注意：本阶段核对的是「内容对不对」，与各 Phase 末 verify_only=true（只验缓存命中）不同。
+
+### 4.1 核对原则
+- **对照源码/CodeGraph 核对，不要仅重读自己写的文字**（用 codegraph_explore / read_file 取证）。
+- **聚焦高风险内容**，不逐字全量重读：
+  - project_map：04_constraints（约束/禁忌）、05_flows（跨模块流程）、06_concepts（关键词→符号映射）
+  - 模块总览：实现约束清单、上下游关系
+  - 子模块：对外能力、典型调用链（抽查）
+
+### 4.2 修正流程
+对每处发现的错误/过时/幻觉：
+1. 依据源码确认正确内容
+2. 重新生成对应片段并回写：
+   - 段落 → save_project_map_segment(segment_id, content=<修正后>)
+   - 模块总览 → save_module_summary(module_name, summary=<修正后>)
+   - 子模块 → save_submodule_summary(module_name, subgroup_name, summary=<修正后>)
+3. 重新 verify_only=true 确认命中
+
+### 4.3 派发建议
+可按模块派子 Agent 并行 review（避免主对话上下文膨胀）；无错误的文档直接跳过。
+
+### 4.4 完成标志
+高风险内容均已对照源码核对；发现的错误已修正并 verify 通过；向用户简述 review 结果（核对了哪些、改了哪些）。
+
+---
+
 ## 整体进度追踪
 
 | 阶段 | 内容 | 完成标志 |
@@ -180,6 +209,7 @@ description: >
 | Phase 1 | project_map 7 段全部生成 | `project_map` 返回完整 Markdown |
 | Phase 2 | 所有模块文档生成 | 每个 `explore_module` 均命中缓存 |
 | Phase 3 | 所有子模块文档生成 | 每个 `explore_submodule` 均命中缓存 |
+| Phase 4 | 文档 Review 自校 | 高风险内容已核对，错误已修正并 verify 通过 |
 
 ---
 
