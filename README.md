@@ -31,7 +31,7 @@ CodeSense 服务**启动时**自动将两个内置 Skill 写入项目的 `.claud
 | Skill | 适用场景 |
 |-------|---------|
 | `codesense-flow` | 理解项目架构、探索模块关系、修改代码前的四层递进探索工作流 |
-| `codesense-init` | 首次初始化 CodeSense 知识文档（project_map → 模块文档 → 子模块文档三阶段流程） |
+| `codesense-init` | 首次初始化 CodeSense 知识文档（project_map → 模块文档 → 子模块文档 → Review 自校流程） |
 
 Skill 文件随 Python 包分发（`src/codesense_v1/skills/`），版本与服务始终对齐；若内容未变则跳过写入，不产生额外开销。同时通过 MCP Prompts 协议（`prompts/list` / `prompts/get`）对外暴露，供支持该协议的客户端按需获取。
 
@@ -45,9 +45,9 @@ Agent (Host)
 │ L1 入口层      server/         MCP stdio 服务  │
 │ L2 注册/分发层 registry/       工具注册与派发   │
 │ L3 工具层      tools/          project_map 等  │
-│ L6 摘要层      summarizer/     结构数据 → prompt│
-│ L4 数据层      data/           查询 CodeGraph DB│
-│ L7 基础设施    cache/ errors   .codesense/ 读写 │
+│ L4 摘要层      summarizer/     结构数据 → prompt│
+│ L5 数据层      data/           查询 CodeGraph DB│
+│ L6 基础设施    cache/ errors   .codesense/ 读写 │
 └─────────────────────────────────────────────┘
         │ 只读
         ▼
@@ -147,12 +147,13 @@ CodeSense 以 MCP stdio 服务方式运行，由宿主 Agent 拉起。
 
 > 请使用 codesense-init Skill 为本项目初始化 CodeSense 知识文档。
 
-Agent 会按四阶段流程自动完成：
+Agent 会按五阶段流程自动完成：
 
 1. **Phase 0（配置）**：询问是否有参考文档和需要忽略的路径，写入 `.codesense/.codesense_config`
 2. **Phase 1（项目概览）**：生成 `project_map`（仓库定位、技术栈、模块划分、关键流程）
 3. **Phase 2（模块文档）**：为每个模块生成详细文档（职责、接口、子模块、依赖）
 4. **Phase 3（子模块文档）**：为每个子模块生成实现细节文档
+5. **Phase 4（Review 自校）**：对照源码 / CodeGraph 核对已生成文档，修正幻觉与过时内容
 
 初始化完成后，知识文档保存在 `.codesense/` 目录下。**建议将该目录纳入版本控制**，团队成员无需重复初始化。
 
