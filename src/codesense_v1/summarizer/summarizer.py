@@ -1718,108 +1718,6 @@ def _build_module_prompt(
 # ---------- project_map segment API -----------------------------------------
 
 
-def _lca_path(paths: list[str]) -> str | None:
-    """计算一组路径的最近公共祖先（按 '/' 分割）。
-
-    例：['auth/api', 'auth/service', 'auth/model'] → 'auth'
-    单路径返回本身；空列表返回 None；无公共前缀返回 None。
-    """
-    if not paths:
-        return None
-    if len(paths) == 1:
-        return paths[0]
-    parts = [p.split("/") for p in paths]
-    common: list[str] = []
-    for level in zip(*parts):
-        if len(set(level)) == 1:
-            common.append(level[0])
-        else:
-            break
-    return "/".join(common) if common else None
-
-
-def render_structure_segment(
-    project_root: Path,
-    top_dirs: list[TopLevelDir],
-    tree_root: DirectoryNode,
-    max_depth: int = 3,
-    modules: list[dict] | None = None,
-) -> str:
-    """Render 02_structure.md — pure program, no Agent needed.
-
-    若提供 *modules*，遇到模块目录时附 `# 描述` 注释并停止向下展开（codemap 风格）。
-    """
-    project_name = project_root.resolve().name or project_root.resolve().parts[-1]
-    lines: list[str] = [f"## 顶层目录结构\n", f"```", f"{project_name}/"]
-
-    aux_names = {d.name for d in top_dirs if d.is_auxiliary}
-
-    # 有模块注释时，提高兜底深度，确保目录树能展开到模块所在层（最终由 module_annotations 截断）
-    effective_max_depth = max(max_depth, 8) if modules else max_depth
-
-    # 构建模块目录 → 描述映射
-    # 对每个模块的 directories 计算 LCA，用最近公共祖先代表该模块在树中的截断位置
-    module_annotations: dict[str, str] = {}
-    if modules:
-        module_lca_dirs: dict[str, str] = {}
-        for m in modules:
-            if not isinstance(m, dict):
-                continue
-            dirs = [str(d).replace("\\", "/") for d in (m.get("directories") or [])]
-            desc = str(m.get("description", "")).strip()
-            lca = _lca_path(dirs)
-            if lca:
-                module_lca_dirs[lca] = desc
-
-        # 跨模块判断：排除是其他模块 LCA 的父目录的情况（避免遮蔽子模块展开）
-        all_lca = set(module_lca_dirs.keys())
-        for d_norm, desc in module_lca_dirs.items():
-            is_parent_of_other = any(
-                other != d_norm and other.startswith(d_norm + "/")
-                for other in all_lca
-            )
-            if not is_parent_of_other:
-                module_annotations[d_norm] = desc
-
-    def _render_node(
-        node: DirectoryNode, depth: int, prefix: str, current_path: str
-    ) -> None:
-        children = sorted(node.subdirs.values(), key=lambda n: n.name)
-        all_items: list[tuple[str, bool, DirectoryNode | None]] = []
-        for c in children:
-            all_items.append((c.name, True, c))
-        for f in sorted(node.files, key=lambda f: f.path):
-            all_items.append((f.path.replace("\\", "/").split("/")[-1], False, None))
-
-        for i, (name, is_dir, child) in enumerate(all_items):
-            is_last = i == len(all_items) - 1
-            connector = "└── " if is_last else "├── "
-            ext_prefix = "    " if is_last else "│   "
-
-            if is_dir:
-                new_path = f"{current_path}/{name}" if current_path else name
-
-                # 命中模块目录：附描述注释，不再向下展开
-                if new_path in module_annotations:
-                    desc = module_annotations[new_path]
-                    annotation = f"   # {desc}" if desc else ""
-                    lines.append(f"{prefix}{connector}{name}/{annotation}")
-                    continue
-
-                td = next((d for d in top_dirs if d.name == name), None)
-                annotation = f"  [{td.category}]" if td and td.category else ""
-                lines.append(f"{prefix}{connector}{name}/{annotation}")
-                if depth < effective_max_depth and child and name not in aux_names:
-                    _render_node(child, depth + 1, prefix + ext_prefix, new_path)
-            else:
-                lines.append(f"{prefix}{connector}{name}")
-
-    _render_node(tree_root, depth=1, prefix="", current_path="")
-    lines.append("```")
-
-    return "\n".join(lines)
-
-
 def render_dependencies_segment(
     modules: list[dict[str, object]],
     edges: list,  # list[ModuleEdge]
@@ -2544,7 +2442,7 @@ def save_project_map_segment(
     """Save a project_map segment to cache.
 
     Args:
-        segment_id: One of "01_identity", "02_structure", "03_modules", "04_constraints", "05_flows", "06_concepts", "07_dependencies"
+        segment_id: One of "01_identity", "03_modules", "04_constraints", "05_flows", "06_concepts", "07_dependencies"
         content: Markdown content of the segment
         source_hash: Hash of the data sources used to generate this segment
     """
