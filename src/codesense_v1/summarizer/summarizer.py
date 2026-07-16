@@ -300,10 +300,12 @@ def _dedup_description(desc: str) -> str:
 def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
     """Return a stable hash representing this module's current content.
 
-    Hash input: sorted file list + sorted symbol fingerprints (file:name:kind:sig)
+    Hash input: sorted file list + sorted symbol fingerprints (file:name:kind)
     + subgroups definition (if any).
-    Changes when files are added/removed, any symbol signature changes, or
-    subgroups definition changes.
+    Changes when files are added/removed, any symbol name/kind changes, or
+    subgroups definition changes.  Deliberately excludes ``signature`` so that
+    signature-only edits (e.g. parameter rename) do not invalidate the overview
+    — the overview's file list and architecture sections only need name+kind.
     """
     files = sorted(str(f) for f in (entry.get("files") or []))
     file_set = set(files)
@@ -311,7 +313,7 @@ def _compute_module_hash(entry: dict[str, object], db: CodeGraphDB) -> str:
     for node in db.iter_nodes(kinds=("function", "class", "method")):
         fp = node.file_path.replace("\\", "/")
         if fp in file_set:
-            symbols.append(f"{fp}:{node.name}:{node.kind}:{node.signature or ''}")
+            symbols.append(f"{fp}:{node.name}:{node.kind}")
     symbols.sort()
     # Include subgroups definition in hash
     subgroups = entry.get("subgroups") or []
