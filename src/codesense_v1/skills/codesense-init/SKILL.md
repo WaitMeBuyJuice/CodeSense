@@ -2,7 +2,7 @@
 name: codesense-init
 description: >
   适用场景：用户需要为项目初始化 CodeSense 知识文档，或在缓存全部失效后重新生成。
-  不适用场景：知识文档已存在且有效、只需查询项目结构（使用 codesense-flow）。
+  不适用场景：知识文档已存在且有效、只需查询项目结构（使用 codesense-explore）。
   激活后按"project_map 初始化 → 模块文档 → 子模块文档 → Review 自校"引导完成全量知识文档生成。
 ---
 

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 
 # Directory names under src/codesense_v1/skills/ — order determines list_prompts() order.
-_SKILL_DIR_NAMES: tuple[str, ...] = ("codesense-flow", "codesense-init")
+_SKILL_DIR_NAMES: tuple[str, ...] = ("codesense-explore", "codesense-init")
 
 
 @dataclass(frozen=True)

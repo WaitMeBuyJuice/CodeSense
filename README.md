@@ -30,7 +30,7 @@ CodeSense 服务**启动时**自动将两个内置 Skill 写入项目的 `.claud
 
 | Skill | 适用场景 |
 |-------|---------|
-| `codesense-flow` | 理解项目架构、探索模块关系、修改代码前的四层递进探索工作流 |
+| `codesense-explore` | 理解项目架构、探索模块关系、修改代码前的四层递进探索工作流 |
 | `codesense-init` | 首次初始化 CodeSense 知识文档（project_map → 模块文档 → 子模块文档 → Review 自校流程） |
 
 Skill 文件随 Python 包分发（`src/codesense_v1/skills/`），版本与服务始终对齐；若内容未变则跳过写入，不产生额外开销。同时通过 MCP Prompts 协议（`prompts/list` / `prompts/get`）对外暴露，供支持该协议的客户端按需获取。
@@ -167,7 +167,7 @@ Agent 会按五阶段流程自动完成：
 
 ### 第三步：探索代码（日常工作流）
 
-日常涉及代码理解、模块定位、修改影响评估等场景时，确保 `codesense-flow` Skill 处于启用状态，Agent 会自行激活并按「全局 → 模块 → 子模块 → 符号原文」四层递进探索，在合适层级获取所需信息后即可开始工作。
+日常涉及代码理解、模块定位、修改影响评估等场景时，确保 `codesense-explore` Skill 处于启用状态，Agent 会自行激活并按「全局 → 模块 → 子模块 → 符号原文」四层递进探索，在合适层级获取所需信息后即可开始工作。
 
 ## 项目根目录解析
 
