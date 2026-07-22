@@ -564,7 +564,7 @@ async def submit_project_map(project_root: Path, response: str) -> str:
 
     cache.write_modules_index(codesense_dir, expanded, current_hash, aux_dirs=aux_dirs)
 
-    # Save basic 03_modules segment so project_map can render immediately.
+    # Save basic 02_modules segment so project_map can render immediately.
     from codesense_v1.data.hashes import compute_architecture_hash, compute_dependencies_hash  # avoid circular
     # Use the same leaf-dir-based hash as project_map.py (not module assignments).
     _all_parent_dirs = {
@@ -577,12 +577,12 @@ async def submit_project_map(project_root: Path, response: str) -> str:
         if not any(other != d and other.startswith(d + "/") for other in _all_parent_dirs)
     })
     seg03_hash = compute_architecture_hash([_current_leaf_dirs])
-    if not cache.is_segment_valid(codesense_dir, "03_modules", seg03_hash):
+    if not cache.is_segment_valid(codesense_dir, "02_modules", seg03_hash):
         layers_for_seg = topological_layers(edges, modules_data)
         seg03_content = _render_basic_architecture_segment(expanded, layers_for_seg)
-        cache.write_segment(codesense_dir, "03_modules", seg03_content, seg03_hash)
+        cache.write_segment(codesense_dir, "02_modules", seg03_content, seg03_hash)
 
-    # Always regenerate 07_dependencies with module name mappings now available.
+    # Always regenerate 06_dependencies with module name mappings now available.
     # Filter out edges where source or target is under an ignored path.
     _sub_ignore_prefixes = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
     if _sub_ignore_prefixes:
@@ -593,7 +593,7 @@ async def submit_project_map(project_root: Path, response: str) -> str:
     cycles_for_07 = find_cycles(edges, modules_data)
     seg07_content = render_dependencies_segment(expanded, edges, cycles_for_07)
     seg07_hash = compute_dependencies_hash(edges)
-    cache.write_segment(codesense_dir, "07_dependencies", seg07_content, seg07_hash)
+    cache.write_segment(codesense_dir, "06_dependencies", seg07_content, seg07_hash)
 
     # Render and persist the new segment-based project_map.md.
     rendered = cache.render_project_map(codesense_dir)
@@ -1726,7 +1726,7 @@ def render_dependencies_segment(
     cycles: list[list[str]],
     centrality: dict[str, object] | None = None,
 ) -> str:
-    """Render 07_dependencies.md — pure program, no Agent needed."""
+    """Render 06_dependencies.md — pure program, no Agent needed."""
     from codesense_v1.data.structure import auxiliary_category
 
     # Build lookup: path (dir or file) → module name
@@ -2444,7 +2444,7 @@ def save_project_map_segment(
     """Save a project_map segment to cache.
 
     Args:
-        segment_id: One of "01_identity", "03_modules", "04_constraints", "05_flows", "06_concepts", "07_dependencies"
+        segment_id: One of "01_identity", "02_modules", "03_constraints", "04_flows", "05_concepts", "06_dependencies"
         content: Markdown content of the segment
         source_hash: Hash of the data sources used to generate this segment
     """
@@ -2452,7 +2452,7 @@ def save_project_map_segment(
     cache.write_segment(codesense_dir, segment_id, content, source_hash)
 
 
-# ---------- Entry-module heuristics for 05_flows ----------------------------
+# ---------- Entry-module heuristics for 04_flows ----------------------------
 
 _ENTRY_LAYER_KEYWORDS = frozenset({
     "tool", "tools", "handler", "handlers",
@@ -2477,7 +2477,7 @@ def _identify_entry_modules(saved_modules: list[dict]) -> list[dict]:
     return candidates
 
 
-# ---------- Symbol-module map for 06_concepts --------------------------------
+# ---------- Symbol-module map for 05_concepts --------------------------------
 
 
 def _build_symbol_module_map(
@@ -2514,7 +2514,7 @@ def _build_symbol_module_map(
 
 
 async def get_constraints_segment_prompt(project_root: Path) -> str:
-    """Return LLM prompt for generating 04_constraints."""
+    """Return LLM prompt for generating 03_constraints."""
     import json
     from codesense_v1.data.hashes import _sha256  # noqa: F401 — used below for hash ref
 
@@ -2577,7 +2577,7 @@ async def get_constraints_segment_prompt(project_root: Path) -> str:
 
 
 async def get_flows_segment_prompt(project_root: Path) -> str:
-    """Return LLM prompt for generating 05_flows."""
+    """Return LLM prompt for generating 04_flows."""
     from codesense_v1.data.aggregate import directory_symbols
 
     codesense_dir = project_root / _CODESENSE_DIR_NAME
@@ -2636,7 +2636,7 @@ async def get_flows_segment_prompt(project_root: Path) -> str:
 
 
 async def get_concepts_segment_prompt(project_root: Path) -> str:
-    """Return LLM prompt for generating 06_concepts."""
+    """Return LLM prompt for generating 05_concepts."""
     codesense_dir = project_root / _CODESENSE_DIR_NAME
 
     modules_index = cache.read_modules_index(codesense_dir)

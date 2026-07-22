@@ -30,11 +30,11 @@ _CODESENSE_DIR = ".codesense"
 
 _SEGMENT_IDS: tuple[str, ...] = (
     "01_identity",
-    "03_modules",
-    "04_constraints",
-    "05_flows",
-    "06_concepts",
-    "07_dependencies",
+    "02_modules",
+    "03_constraints",
+    "04_flows",
+    "05_concepts",
+    "06_dependencies",
 )
 
 _SCHEMA: Final[dict[str, object]] = {
@@ -100,11 +100,11 @@ def _compute_segment_hashes(project_root, codesense_dir, saved_modules, db) -> d
 
     return {
         "01_identity": hash_01,
-        "03_modules": hash_03,
-        "04_constraints": imports_hash,
-        "05_flows": hash_05,
-        "06_concepts": hash_06,
-        "07_dependencies": imports_hash,
+        "02_modules": hash_03,
+        "03_constraints": imports_hash,
+        "04_flows": hash_05,
+        "05_concepts": hash_06,
+        "06_dependencies": imports_hash,
     }
 
 
@@ -177,7 +177,7 @@ async def init_status() -> str:
     # ── Phase 2 & 3: modules and subgroups ───────────────────────────────────
     if modules_index is None:
         lines.append("### Phase 2：模块文档")
-        lines.append("❌ modules_index 不存在，请先完成 Phase 1（03_modules 段落）。")
+        lines.append("❌ modules_index 不存在，请先完成 Phase 1（02_modules 段落）。")
         lines.append("")
         lines.append("### Phase 3：子模块文档")
         lines.append("❌ 依赖 Phase 2，暂无数据。")

@@ -166,30 +166,30 @@ async def project_map(_nonce: str | None = None) -> str:
         (str(m.get("name", "")), str(m.get("description", "")))
         for m in saved_modules if isinstance(m, dict)
     )
-    # 06_concepts 内容结构跟随模块划分，故 hash 跟随 modules_desc + hash_03 联动
-    # （03 失效 → 06 必失效；模块名/描述变化 → 06 失效）
+    # 05_concepts 内容结构跟随模块划分，故 hash 跟随 modules_desc + hash_02 联动
+    # （02 失效 → 05 必失效；模块名/描述变化 → 05 失效）
     hash_06 = _sha256(json.dumps(modules_desc) + hash_03)
 
     # ---- Generate pure-program segments immediately -------------------------
-    if not _seg_valid(codesense_dir, "07_dependencies", hash_07, auto_expire):
+    if not _seg_valid(codesense_dir, "06_dependencies", hash_07, auto_expire):
         content_07 = render_dependencies_segment(saved_modules, edges_internal, cycles)
-        cache.write_segment(codesense_dir, "07_dependencies", content_07, hash_07)
+        cache.write_segment(codesense_dir, "06_dependencies", content_07, hash_07)
 
     # ---- Check what needs Agent ---------------------------------------------
-    need_03 = not _seg_valid(codesense_dir, "03_modules", hash_03, auto_expire)
-    dep_note = "（需 03_modules 先完成）" if need_03 else ""
+    need_03 = not _seg_valid(codesense_dir, "02_modules", hash_03, auto_expire)
+    dep_note = "（需 02_modules 先完成）" if need_03 else ""
 
     missing: list[tuple[str, str, str | None]] = []  # (seg_id, desc, dep)
     if not _seg_valid(codesense_dir, "01_identity", hash_01, auto_expire):
         missing.append(("01_identity", "仓库定位 + 技术栈", None))
     if need_03:
-        missing.append(("03_modules", "模块列表（其他段依赖此段，请优先完成）", None))
-    if not _seg_valid(codesense_dir, "04_constraints", hash_04, auto_expire):
-        missing.append(("04_constraints", "模块边界规则" + dep_note, "03_modules" if need_03 else None))
-    if not _seg_valid(codesense_dir, "05_flows", hash_05, auto_expire):
-        missing.append(("05_flows", "关键流程描述" + dep_note, "03_modules" if need_03 else None))
-    if not _seg_valid(codesense_dir, "06_concepts", hash_06, auto_expire):
-        missing.append(("06_concepts", "概念索引" + dep_note, "03_modules" if need_03 else None))
+        missing.append(("02_modules", "模块列表（其他段依赖此段，请优先完成）", None))
+    if not _seg_valid(codesense_dir, "03_constraints", hash_04, auto_expire):
+        missing.append(("03_constraints", "模块边界规则" + dep_note, "02_modules" if need_03 else None))
+    if not _seg_valid(codesense_dir, "04_flows", hash_05, auto_expire):
+        missing.append(("04_flows", "关键流程描述" + dep_note, "02_modules" if need_03 else None))
+    if not _seg_valid(codesense_dir, "05_concepts", hash_06, auto_expire):
+        missing.append(("05_concepts", "概念索引" + dep_note, "02_modules" if need_03 else None))
 
     if not missing:
         result = cache.render_project_map(codesense_dir)
@@ -200,18 +200,18 @@ async def project_map(_nonce: str | None = None) -> str:
     tech_hints = extract_tech_stack_hint(identity_sources)
     seg_prompts: dict[str, str] = {}
     for seg_id, _, dep in missing:
-        if dep:  # blocked by 03_modules, skip prompt fetch
+        if dep:  # blocked by 02_modules, skip prompt fetch
             continue
         try:
             if seg_id == "01_identity":
                 seg_prompts[seg_id] = get_identity_segment_prompt(identity_sources, tech_hints)
-            elif seg_id == "03_modules":
+            elif seg_id == "02_modules":
                 seg_prompts[seg_id] = await get_project_map_prompt(project_root)
-            elif seg_id == "04_constraints":
+            elif seg_id == "03_constraints":
                 seg_prompts[seg_id] = await get_constraints_segment_prompt(project_root)
-            elif seg_id == "05_flows":
+            elif seg_id == "04_flows":
                 seg_prompts[seg_id] = await get_flows_segment_prompt(project_root)
-            elif seg_id == "06_concepts":
+            elif seg_id == "05_concepts":
                 seg_prompts[seg_id] = await get_concepts_segment_prompt(project_root)
         except Exception as exc:
             seg_prompts[seg_id] = f"（提示词获取失败：{exc}）"
@@ -222,7 +222,7 @@ async def project_map(_nonce: str | None = None) -> str:
         dep_str = f"\n\n   ⚠️ 依赖 `{dep}`，请等 `{dep}` 完成后再生成此段。" if dep else ""
         save_call = (
             f"`submit_project_map(response=<生成的模块划分文本>)`"
-            if seg_id == "03_modules"
+            if seg_id == "02_modules"
             else f"`save_project_map_segment(segment_id=\"{seg_id}\", content=<生成内容>)`"
         )
         prompt_section = ""
@@ -256,9 +256,9 @@ async def project_map(_nonce: str | None = None) -> str:
         "# 项目概览尚未完整，需生成以下段落\n\n"
         + summary_str
         + "## 生成顺序说明\n\n"
-        "- **必须先完成 `03_modules`**（其他段依赖模块划分结果）\n"
-        "- `01_identity` 与 `03_modules` 可并行生成\n"
-        "- `04_constraints`、`05_flows`、`06_concepts` 需在 `03_modules` 完成后执行\n\n"
+        "- **必须先完成 `02_modules`**（其他段依赖模块划分结果）\n"
+        "- `01_identity` 与 `02_modules` 可并行生成\n"
+        "- `03_constraints`、`04_flows`、`05_concepts` 需在 `02_modules` 完成后执行\n\n"
         "**全部完成后，重新调用 `project_map` 获取完整概览。**\n\n"
         "---\n\n"
         f"{steps_str}\n"

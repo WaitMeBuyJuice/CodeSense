@@ -24,10 +24,10 @@ from codesense_v1.tools._project_root import project_root_not_found_error, resol
 
 _VALID_SEGMENT_IDS = (
     "01_identity",
-    "03_modules",
-    "04_constraints",
-    "05_flows",
-    "06_concepts",
+    "02_modules",
+    "03_constraints",
+    "04_flows",
+    "05_concepts",
 )
 
 _SCHEMA: Final[dict[str, object]] = {
@@ -35,7 +35,7 @@ _SCHEMA: Final[dict[str, object]] = {
     "properties": {
         "segment_id": {
             "type": "string",
-            "description": "段落 ID：01_identity、03_modules、04_constraints、05_flows 或 06_concepts",
+            "description": "段落 ID：01_identity、02_modules、03_constraints、04_flows 或 05_concepts",
             "enum": list(_VALID_SEGMENT_IDS),
         },
         "content": {
@@ -87,7 +87,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             sources = collect_identity_sources(project_root, db)
             source_hash = compute_identity_hash(sources)
 
-        elif segment_id == "03_modules":
+        elif segment_id == "02_modules":
             roots, _ = _resolve_roots_and_aux(all_file_paths, project_root)
             all_file_paths_l1 = [p for p in all_file_paths if any(p.startswith(r + "/") or p == r for r in roots)]
             # Apply ignore_docs.paths filter (same as project_map.py hash_03)
@@ -106,7 +106,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             })
             source_hash = compute_architecture_hash([current_leaf_dirs])
 
-        elif segment_id == "04_constraints":
+        elif segment_id == "03_constraints":
             _edges_all = [e for e in module_dependencies(db, include_external=False)]
             # Apply ignore_docs.paths filter (same as project_map.py hash_04)
             _ignore_prefixes_04 = [p.replace("\\", "/").rstrip("/") for p in get_ignore_paths(project_root) if p.strip()]
@@ -118,7 +118,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
                 ]
             source_hash = compute_dependencies_hash(_edges_all)
 
-        elif segment_id == "05_flows":
+        elif segment_id == "04_flows":
             all_db_edges = list(db.iter_edges())
             calls_edges = sorted(
                 (e.source, e.target)
@@ -127,7 +127,7 @@ async def save_project_map_segment_tool(segment_id: str, content: str) -> str:
             )
             source_hash = _sha256(json.dumps(calls_edges))
 
-        elif segment_id == "06_concepts":  # 06_concepts
+        elif segment_id == "05_concepts":  # 05_concepts
             modules_index = cache.read_modules_index(codesense_dir)
             saved_modules = (modules_index or {}).get("modules", [])
             modules_desc = sorted(
